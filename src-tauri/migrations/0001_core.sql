@@ -5,9 +5,6 @@
 
 PRAGMA foreign_keys = ON;
 
-CREATE TABLE schema_version (version INTEGER NOT NULL);
-INSERT INTO schema_version VALUES (1);
-
 -- ───────── Identité commune ─────────
 CREATE TABLE nodes (
     id          INTEGER PRIMARY KEY,
