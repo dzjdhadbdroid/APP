@@ -1,56 +1,51 @@
-# Sitcom Studio — Architecture
+# Sitcom Studio — Architecture (100 % Rust)
 
 ## Principe directeur
 Une seule source de vérité SQLite. Tout élément de l'univers est un **nœud** (`nodes`),
 toutes les connexions sont des **liens typés** (`links`). La Universe Map, la Story Timeline,
 la recherche et les fiches lisent les mêmes tables : aucune donnée dupliquée (Module 14).
+Toute écriture passe par `StudioApp::apply`, qui recharge aussitôt les données partagées :
+une modification est visible immédiatement dans tous les modules.
 
 ## Stack
-Rust + Tauri · React/TypeScript · SQLite (FTS5) · local, hors ligne.
+Un seul crate Rust · **egui/eframe** (interface) · **rusqlite** (SQLite embarqué, FTS5) · local, hors ligne.
 
-## Arborescence prévue
+## Arborescence
 ```
-app/
-├─ src-tauri/
-│  ├─ migrations/        0001_core.sql (fait), 0002_…
-│  └─ src/
-│     ├─ db/             connexion, migrations, repositories (accès aux données)
-│     ├─ domain/         logique métier (personnages, épisodes, événements…)
-│     ├─ graph/          Universe Map : voisinage, chemins, isolés, filtres
-│     ├─ timeline/       3 ordres + détection d'incohérences temporelles
-│     ├─ consistency/    règles d'alertes
-│     ├─ search/         FTS5
-│     ├─ ai/             trait `LlmProvider` (OpenAI / Anthropic / local), validation humaine
-│     ├─ backup/         sauvegardes, export JSON/Markdown/PDF, import
-│     └─ commands.rs     commandes Tauri (couche fine)
-└─ src/                  React : pages, composants, store, vues graphe/timeline
+migrations/0001_core.sql   schéma noyau (nœuds, liens, événements, scènes, alertes, FTS5)
+src/
+├─ main.rs                 point d'entrée, dossier de données, sauvegarde auto au lancement
+├─ db/                     accès aux données
+│  ├─ mod.rs               connexion, migrations (user_version), sauvegardes
+│  ├─ nodes.rs             CRUD des nœuds, recherche plein texte
+│  ├─ links.rs             liens typés, voisinage direct/indirect (CTE récursive)
+│  └─ timeline.rs          3 ordres : réel / diffusion / présentation
+├─ graph/layout.rs         placement par forces (Rust pur, testé)
+├─ story_date.rs           dates fictives partielles → clé de tri (Rust pur, testé)
+└─ ui/                     interface egui
+   ├─ mod.rs               navigation, tableau de bord, fiches, recherche
+   ├─ graph_view.rs        Module 12 : Universe Map
+   └─ timeline_view.rs     Module 13 : Story Timeline
 ```
 
-## Modules 12–14 : comment ils s'appuient sur le modèle
-- **Map (12)** : `nodes` = sommets, `links` = arêtes typées. Voisinage direct/indirect par CTE
-  récursive. Isolés : vue `v_isolated_nodes`. Mise à jour dynamique : chaque commande Tauri
-  d'écriture émet un événement `graph:changed` ; le front recharge le sous-graphe concerné.
-- **Timeline (13)** : trois ordres distincts, une source :
-  réel = `events.story_sort`, diffusion = `episodes.air_order`, présentation = `scenes.position`.
-  Statuts, importance, personnages/lieux/épisodes/intrigues liés via `links`.
-- **Interconnexion (14)** : navigation Personnage → Relations → Événements → Épisodes →
-  Intrigues → Lieux = simples traversées de `links`. Historique d'un lien : `link_history`.
-- **Cohérence temporelle** : table `knowledge` (qui apprend quoi, quand). Règle type :
-  un personnage impliqué dans un événement dont `story_sort` précède celui où il apprend/rencontre
-  le sujet requis → alerte `alerts` (gravité, ignorable).
-
-## Étapes de développement
-1. ✅ Schéma noyau + validation (ce commit local)
-2. Squelette Tauri + couche `db` + migrations + tests Rust
-3. CRUD nœuds/liens + événement `graph:changed`
-4. Personnages, lieux, objets (fiches)
-5. Épisodes + scènes
-6. Intrigues
-7. **Universe Map** (module 12)
-8. **Story Timeline** (module 13) + règles temporelles
-9. Recherche globale, alertes, sauvegardes/historique
-10. Module IA (contexte sélectionnable, citations, validation obligatoire)
+## État d'avancement
+| Fonction | État |
+|---|---|
+| Schéma, migrations, CRUD, liens, recherche FTS5 | écrit, testé en SQL |
+| Fiches (titre, résumé, notes, connexions éditables) | écrit |
+| Universe Map : zoom/déplacement, filtres, exploration, isolés, surlignage | écrit |
+| Timeline : chronologie réelle, diffusion (réordonnable), scènes, filtre par élément | écrit |
+| Sauvegarde auto (10 conservées) + manuelle | écrit |
+| Fiches détaillées (champs psychologie, biographie…) | **à faire** (colonnes en base, pas encore dans l'UI) |
+| Éditeur de scénario (actes/séquences/dialogues) | **à faire** |
+| Détection d'incohérences temporelles / alertes | **à faire** (tables `knowledge`, `alerts` prêtes) |
+| Chronologie comparative de plusieurs personnages, vue saison | **à faire** |
+| Historique des modifications / restauration, export JSON/Markdown/PDF, import | **à faire** |
+| Module IA (trait `LlmProvider`, validation humaine) | **à faire** |
 
 ## Limites actuelles
-Aucun code Rust/React compilé à ce stade : le réseau est coupé dans cet environnement
-(impossible de télécharger les crates/paquets npm). Seul le SQL est testé.
+Le réseau est coupé dans l'environnement de développement : `eframe` et `rusqlite` n'ont pas pu
+être téléchargés, donc **l'application complète n'a jamais été compilée**. Vérifié : syntaxe de
+tous les fichiers, tests réels de `graph/layout.rs` et `story_date.rs` (compilés avec rustc),
+et toutes les requêtes SQL rejouées dans SQLite. Les tests Rust de `db/` et la compilation
+de `ui/` restent à lancer : `cargo test` puis `cargo run`.

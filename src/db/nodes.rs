@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{DbError, DbResult};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum NodeKind {
     Character,
@@ -41,6 +41,40 @@ impl NodeKind {
             "scene" => Self::Scene,
             other => return Err(DbError::UnknownKind(other.to_string())),
         })
+    }
+
+    pub const ALL: [NodeKind; 7] = [
+        Self::Character,
+        Self::Place,
+        Self::Episode,
+        Self::Plot,
+        Self::Object,
+        Self::Event,
+        Self::Scene,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Character => "Personnage",
+            Self::Place => "Lieu",
+            Self::Episode => "Épisode",
+            Self::Plot => "Intrigue",
+            Self::Object => "Objet",
+            Self::Event => "Événement",
+            Self::Scene => "Scène",
+        }
+    }
+
+    pub fn label_plural(self) -> &'static str {
+        match self {
+            Self::Character => "Personnages",
+            Self::Place => "Lieux",
+            Self::Episode => "Épisodes",
+            Self::Plot => "Intrigues",
+            Self::Object => "Objets",
+            Self::Event => "Événements",
+            Self::Scene => "Scènes",
+        }
     }
 
     /// Nom de la table de détail (valeurs fixes : jamais issues de l'utilisateur).
@@ -106,15 +140,63 @@ pub fn create(conn: &Connection, kind: NodeKind, title: &str) -> DbResult<i64> {
     Ok(id)
 }
 
+/// Crée un épisode ; l'ordre de diffusion initial est « à la suite » des existants.
 pub fn create_episode(conn: &Connection, title: &str, season: i64, number: i64) -> DbResult<i64> {
     let tx = conn.unchecked_transaction()?;
     let id = insert_node(&tx, NodeKind::Episode, title)?;
     tx.execute(
-        "INSERT INTO episodes (id, season, number) VALUES (?1, ?2, ?3)",
+        "INSERT INTO episodes (id, season, number, air_order)
+         VALUES (?1, ?2, ?3, (SELECT COALESCE(MAX(air_order), 0) + 1 FROM episodes))",
         params![id, season, number],
     )?;
     tx.commit()?;
     Ok(id)
+}
+
+/// Prochain numéro d'épisode libre dans une saison.
+pub fn next_episode_number(conn: &Connection, season: i64) -> DbResult<i64> {
+    Ok(conn.query_row(
+        "SELECT COALESCE(MAX(number), 0) + 1 FROM episodes WHERE season = ?1",
+        [season],
+        |r| r.get(0),
+    )?)
+}
+
+/// Prochaine position libre pour une scène d'un épisode.
+pub fn next_scene_position(conn: &Connection, episode_id: i64) -> DbResult<i64> {
+    Ok(conn.query_row(
+        "SELECT COALESCE(MAX(position), 0) + 1 FROM scenes WHERE episode_id = ?1",
+        [episode_id],
+        |r| r.get(0),
+    )?)
+}
+
+/// Tous les nœuds (pour la carte de l'univers).
+pub fn all(conn: &Connection) -> DbResult<Vec<Node>> {
+    let mut stmt = conn.prepare(&format!("SELECT {COLS} FROM nodes ORDER BY id"))?;
+    let rows = stmt.query_map([], from_row)?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// Nombre de nœuds par type.
+pub fn counts(conn: &Connection) -> DbResult<Vec<(NodeKind, i64)>> {
+    let mut stmt = conn.prepare("SELECT kind, COUNT(*) FROM nodes GROUP BY kind")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (k, n) = row?;
+        out.push((NodeKind::parse(&k)?, n));
+    }
+    Ok(out)
+}
+
+/// Derniers éléments modifiés.
+pub fn recent(conn: &Connection, limit: i64) -> DbResult<Vec<Node>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLS} FROM nodes ORDER BY updated_at DESC, id DESC LIMIT ?1"
+    ))?;
+    let rows = stmt.query_map([limit], from_row)?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 pub fn create_scene(
@@ -172,10 +254,18 @@ pub fn update_text(
 
 /// Supprime le nœud ; fiche de détail, liens et index de recherche suivent (cascade/triggers).
 pub fn delete(conn: &Connection, id: i64) -> DbResult<()> {
-    let n = conn.execute("DELETE FROM nodes WHERE id = ?1", [id])?;
+    let tx = conn.unchecked_transaction()?;
+    // Les scènes d'un épisode sont aussi des nœuds : la cascade SQL ne supprimerait que
+    // leur ligne de détail, laissant des nœuds orphelins. On les supprime explicitement.
+    tx.execute(
+        "DELETE FROM nodes WHERE id IN (SELECT id FROM scenes WHERE episode_id = ?1)",
+        [id],
+    )?;
+    let n = tx.execute("DELETE FROM nodes WHERE id = ?1", [id])?;
     if n == 0 {
-        return Err(DbError::NotFound(id));
+        return Err(DbError::NotFound(id)); // la transaction est annulée à la sortie
     }
+    tx.commit()?;
     Ok(())
 }
 
@@ -192,6 +282,21 @@ pub fn isolated(conn: &Connection) -> DbResult<Vec<Node>> {
     let mut stmt = conn.prepare(&format!("SELECT {COLS} FROM v_isolated_nodes ORDER BY title"))?;
     let rows = stmt.query_map([], from_row)?;
     Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// Recherche plein texte (titre, résumé, notes) saisie par l'utilisateur : le texte est
+/// protégé (guillemets) pour qu'aucune syntaxe FTS5 ne puisse provoquer d'erreur,
+/// et chaque mot est cherché comme préfixe (recherche instantanée).
+pub fn search_text(conn: &Connection, text: &str) -> DbResult<Vec<Node>> {
+    let q = text
+        .split_whitespace()
+        .map(|w| format!("\"{}\"*", w.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(" ");
+    if q.is_empty() {
+        return Ok(Vec::new());
+    }
+    search(conn, &q)
 }
 
 /// Recherche plein texte (titre, résumé, notes). `query` est une requête FTS5.
@@ -228,6 +333,24 @@ mod tests {
         let ep = create_episode(&conn, "Pilote", 1, 1).unwrap();
         create_scene(&conn, ep, "Scène 1", 1).unwrap();
         assert!(create_episode(&conn, "Doublon", 1, 1).is_err()); // (saison, numéro) unique
+    }
+
+    #[test]
+    fn deleting_an_episode_removes_its_scene_nodes() {
+        let conn = open_in_memory().unwrap();
+        let ep = create_episode(&conn, "Pilote", 1, 1).unwrap();
+        create_scene(&conn, ep, "Scène 1", 1).unwrap();
+        delete(&conn, ep).unwrap();
+        assert!(all(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn user_search_text_never_breaks_fts_syntax() {
+        let conn = open_in_memory().unwrap();
+        create(&conn, NodeKind::Character, "Alice Martin").unwrap();
+        assert_eq!(search_text(&conn, "ali").unwrap().len(), 1); // préfixe
+        assert!(search_text(&conn, "\" AND ( OR *").is_ok()); // syntaxe hostile
+        assert!(search_text(&conn, "   ").unwrap().is_empty());
     }
 
     #[test]

@@ -54,6 +54,13 @@ pub fn delete(conn: &Connection, id: i64) -> DbResult<()> {
     Ok(())
 }
 
+/// Tous les liens de l'univers.
+pub fn all(conn: &Connection) -> DbResult<Vec<Link>> {
+    let mut stmt = conn.prepare(&format!("SELECT {COLS} FROM links ORDER BY id"))?;
+    let rows = stmt.query_map([], from_row)?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
 /// Tous les liens touchant un nœud (entrants et sortants).
 pub fn for_node(conn: &Connection, node_id: i64) -> DbResult<Vec<Link>> {
     let mut stmt = conn.prepare(&format!(
