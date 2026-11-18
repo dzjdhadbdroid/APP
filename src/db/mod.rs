@@ -1,6 +1,9 @@
 //! Couche d'accès aux données : connexion, migrations, dépôts (repositories).
 
+pub mod alerts;
 pub mod error;
+pub mod fields;
+pub mod knowledge;
 pub mod links;
 pub mod nodes;
 pub mod timeline;
@@ -12,7 +15,10 @@ use rusqlite::Connection;
 pub use error::{DbError, DbResult};
 
 /// Migrations ordonnées. La version appliquée est stockée dans `PRAGMA user_version`.
-const MIGRATIONS: &[(i64, &str)] = &[(1, include_str!("../../migrations/0001_core.sql"))];
+const MIGRATIONS: &[(i64, &str)] = &[
+    (1, include_str!("../../migrations/0001_core.sql")),
+    (2, include_str!("../../migrations/0002_character_fields.sql")),
+];
 
 pub fn open(path: &Path) -> DbResult<Connection> {
     init(Connection::open(path)?)
@@ -128,6 +134,23 @@ mod tests {
         let v: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 1);
+        assert_eq!(v, 2);
+    }
+
+    #[test]
+    fn upgrades_an_existing_v1_database_without_losing_data() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        conn.execute_batch(MIGRATIONS[0].1).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+        conn.execute("INSERT INTO nodes (kind, title) VALUES ('character', 'Alice')", []).unwrap();
+        conn.execute("INSERT INTO characters (id) VALUES (1)", []).unwrap();
+        migrate(&mut conn).unwrap();
+        let (v, n): (i64, i64) = (
+            conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap(),
+            conn.query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0)).unwrap(),
+        );
+        assert_eq!((v, n), (2, 1));
+        conn.execute("UPDATE characters SET evolution = 'x' WHERE id = 1", []).unwrap(); // colonne ajoutée
     }
 }

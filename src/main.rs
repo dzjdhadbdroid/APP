@@ -1,5 +1,6 @@
 //! Sitcom Studio — application desktop 100 % Rust (egui/eframe + SQLite).
 
+mod consistency;
 mod db;
 mod graph;
 mod story_date;

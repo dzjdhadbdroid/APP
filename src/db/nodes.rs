@@ -78,7 +78,7 @@ impl NodeKind {
     }
 
     /// Nom de la table de détail (valeurs fixes : jamais issues de l'utilisateur).
-    fn detail_table(self) -> &'static str {
+    pub fn detail_table(self) -> &'static str {
         match self {
             Self::Character => "characters",
             Self::Place => "places",

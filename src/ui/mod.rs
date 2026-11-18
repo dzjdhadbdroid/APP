@@ -2,6 +2,7 @@
 //! Toute écriture passe par `apply`, qui recharge aussitôt les données partagées :
 //! Universe Map, Timeline et fiches voient donc les modifications immédiatement.
 
+mod alerts_view;
 mod graph_view;
 mod timeline_view;
 
@@ -13,13 +14,16 @@ use rusqlite::Connection;
 
 use crate::db::{
     self,
+    alerts::{self, AlertRow},
+    fields::{self, FieldKind},
+    knowledge::{self, KnowledgeRow},
     links::{self, Link},
     nodes::{self, Node, NodeKind},
     DbError, DbResult,
 };
 
 /// (code stocké en base, libellé affiché)
-pub const LINK_TYPES: [(&str, &str); 10] = [
+pub const LINK_TYPES: [(&str, &str); 11] = [
     ("relation", "relation entre personnages"),
     ("lives_in", "habite"),
     ("located_at", "se situe à"),
@@ -29,6 +33,7 @@ pub const LINK_TYPES: [(&str, &str); 10] = [
     ("advances", "fait avancer"),
     ("owns", "possède"),
     ("involves", "implique"),
+    ("requires", "nécessite (connaissance préalable)"),
     ("mentions", "mentionne"),
 ];
 
@@ -65,6 +70,7 @@ enum View {
     Kind(NodeKind),
     Timeline,
     Graph,
+    Alerts,
 }
 
 struct Edit {
@@ -72,6 +78,14 @@ struct Edit {
     title: String,
     summary: String,
     notes: String,
+    /// Champs détaillés, dans l'ordre de `fields::defs(kind)`.
+    fields: Vec<String>,
+}
+
+#[derive(Default)]
+struct KnowForm {
+    subject: Option<i64>,
+    event: Option<i64>,
 }
 
 #[derive(Default)]
@@ -94,6 +108,9 @@ pub struct StudioApp {
     search_results: Vec<Node>,
     status: String,
     link_form: LinkForm,
+    know_form: KnowForm,
+    alerts: Vec<AlertRow>,
+    show_ignored: bool,
     graph: graph_view::GraphState,
     timeline: timeline_view::TimelineState,
 }
@@ -113,6 +130,9 @@ impl StudioApp {
             search_results: Vec::new(),
             status: String::from("Prêt."),
             link_form: LinkForm::default(),
+            know_form: KnowForm::default(),
+            alerts: Vec::new(),
+            show_ignored: false,
             graph: graph_view::GraphState::new(),
             timeline: timeline_view::TimelineState::default(),
         };
@@ -139,6 +159,11 @@ impl StudioApp {
             if !self.nodes.iter().any(|n| n.id == f) {
                 self.graph.focus = None;
             }
+        }
+        // Alertes de cohérence : recalculées sur la même source de données.
+        match alerts::refresh(&self.conn).and_then(|_| alerts::list(&self.conn)) {
+            Ok(a) => self.alerts = a,
+            Err(e) => self.status = format!("Erreur d'analyse : {e}"),
         }
         self.refresh_search();
         self.graph.settle = 300; // le graphe se réorganise après chaque changement
@@ -169,13 +194,20 @@ impl StudioApp {
 
     fn select(&mut self, id: i64) {
         self.selected = Some(id);
-        self.edit = self.nodes.iter().find(|n| n.id == id).map(|n| Edit {
-            id,
-            title: n.title.clone(),
-            summary: n.summary.clone(),
-            notes: n.notes.clone(),
+        let conn = &self.conn;
+        self.edit = self.nodes.iter().find(|n| n.id == id).map(|n| {
+            let mut f = fields::load(conn, n.kind, id).unwrap_or_default();
+            f.resize(fields::defs(n.kind).len(), String::new());
+            Edit {
+                id,
+                title: n.title.clone(),
+                summary: n.summary.clone(),
+                notes: n.notes.clone(),
+                fields: f,
+            }
         });
         self.link_form = LinkForm::default();
+        self.know_form = KnowForm::default();
     }
 
     /// Ouvre la fiche d'un élément dans son module.
@@ -204,16 +236,18 @@ impl StudioApp {
         }
         ui.separator();
 
+        let open_alerts = self.alerts.iter().filter(|a| a.status == "open").count();
         let items = [
-            ("Tableau de bord", View::Dashboard),
-            ("Personnages", View::Kind(NodeKind::Character)),
-            ("Lieux", View::Kind(NodeKind::Place)),
-            ("Épisodes", View::Kind(NodeKind::Episode)),
-            ("Intrigues", View::Kind(NodeKind::Plot)),
-            ("Objets", View::Kind(NodeKind::Object)),
-            ("Événements", View::Kind(NodeKind::Event)),
-            ("Chronologie", View::Timeline),
-            ("Graphe de l'univers", View::Graph),
+            ("Tableau de bord".to_string(), View::Dashboard),
+            ("Personnages".to_string(), View::Kind(NodeKind::Character)),
+            ("Lieux".to_string(), View::Kind(NodeKind::Place)),
+            ("Épisodes".to_string(), View::Kind(NodeKind::Episode)),
+            ("Intrigues".to_string(), View::Kind(NodeKind::Plot)),
+            ("Objets".to_string(), View::Kind(NodeKind::Object)),
+            ("Événements".to_string(), View::Kind(NodeKind::Event)),
+            ("Chronologie".to_string(), View::Timeline),
+            ("Graphe de l'univers".to_string(), View::Graph),
+            (format!("Alertes ({open_alerts})"), View::Alerts),
         ];
         for (label, v) in items {
             if ui.selectable_label(self.view == v, label).clicked() {
@@ -290,10 +324,16 @@ impl StudioApp {
             });
         }
         ui.add_space(12.0);
-        ui.label(
-            RichText::new("Alertes de cohérence : pas encore implémentées.")
-                .color(Color32::from_gray(130)),
-        );
+        let count = |sev: &str| self.alerts.iter().filter(|a| a.status == "open" && a.severity == sev).count();
+        ui.heading("Alertes de cohérence");
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(format!("{} erreur(s)", count("error"))).color(Color32::from_rgb(255, 90, 90)));
+            ui.label(RichText::new(format!("{} attention", count("warning"))).color(Color32::from_rgb(255, 180, 80)));
+            ui.label(RichText::new(format!("{} info", count("info"))).color(Color32::from_rgb(120, 190, 255)));
+            if ui.link("Voir les alertes").clicked() {
+                goto = Some(View::Alerts);
+            }
+        });
 
         if let Some(v) = goto {
             self.view = v;
@@ -393,8 +433,19 @@ impl StudioApp {
         let kind = self.nodes.iter().find(|n| n.id == id).map(|n| n.kind);
         let (mut save, mut delete, mut add_scene, mut add_link) = (false, false, false, false);
         let (mut open, mut del_link) = (None, None);
+        let (mut add_know, mut del_know) = (false, None);
+        let defs: &[fields::FieldDef] = match kind {
+            Some(k) => fields::defs(k),
+            None => &[],
+        };
+        let know: Vec<KnowledgeRow> = if kind == Some(NodeKind::Character) {
+            knowledge::for_character(&self.conn, id).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
 
         {
+            let kform = &mut self.know_form;
             let nodes = &self.nodes;
             let all_links = &self.links;
             let form = &mut self.link_form;
@@ -412,6 +463,35 @@ impl StudioApp {
                         .desired_rows(6)
                         .desired_width(f32::INFINITY),
                 );
+                for (i, def) in defs.iter().enumerate() {
+                    ui.label(def.label);
+                    let value = &mut edit.fields[i];
+                    match def.kind {
+                        FieldKind::Line => {
+                            ui.add(egui::TextEdit::singleline(value).desired_width(f32::INFINITY));
+                        }
+                        FieldKind::Text => {
+                            ui.add(
+                                egui::TextEdit::multiline(value)
+                                    .desired_rows(3)
+                                    .desired_width(f32::INFINITY),
+                            );
+                        }
+                        FieldKind::Choice(options) => {
+                            let shown = options
+                                .iter()
+                                .find(|(code, _)| *code == value.as_str())
+                                .map_or("—", |(_, label)| *label);
+                            egui::ComboBox::from_id_salt(def.column)
+                                .selected_text(shown)
+                                .show_ui(ui, |ui| {
+                                    for (code, label) in options {
+                                        ui.selectable_value(value, code.to_string(), *label);
+                                    }
+                                });
+                        }
+                    }
+                }
                 ui.horizontal(|ui| {
                     if ui.button("Enregistrer").clicked() {
                         save = true;
@@ -477,11 +557,69 @@ impl StudioApp {
                 if ui.button("Relier").clicked() {
                     add_link = true;
                 }
+
+                if kind == Some(NodeKind::Character) {
+                    ui.separator();
+                    ui.heading("Connaissances");
+                    ui.label(
+                        RichText::new("Ce que ce personnage sait, et à quel événement il l'apprend (sert aux alertes de cohérence).")
+                            .color(Color32::from_gray(130)),
+                    );
+                    for k in &know {
+                        ui.horizontal(|ui| {
+                            let when = k
+                                .learned_event_title
+                                .as_ref()
+                                .map_or("moment non précisé".to_string(), |t| format!("appris à « {t} »"));
+                            ui.label(format!("sait « {} » — {when}", k.subject_title));
+                            if ui.small_button("✕").clicked() {
+                                del_know = Some(k.id);
+                            }
+                        });
+                    }
+                    let subj = kform
+                        .subject
+                        .map_or_else(|| "Information / élément…".to_string(), |t| title_in(nodes, t).to_string());
+                    egui::ComboBox::from_id_salt("know_subject").selected_text(subj).show_ui(ui, |ui| {
+                        for n in nodes.iter().filter(|n| n.id != id) {
+                            ui.selectable_value(&mut kform.subject, Some(n.id), format!("{} · {}", n.kind.label(), n.title));
+                        }
+                    });
+                    let ev = kform
+                        .event
+                        .map_or_else(|| "Appris à l'événement… (facultatif)".to_string(), |t| title_in(nodes, t).to_string());
+                    egui::ComboBox::from_id_salt("know_event").selected_text(ev).show_ui(ui, |ui| {
+                        ui.selectable_value(&mut kform.event, None, "(moment non précisé)");
+                        for n in nodes.iter().filter(|n| n.kind == NodeKind::Event) {
+                            ui.selectable_value(&mut kform.event, Some(n.id), n.title.as_str());
+                        }
+                    });
+                    if ui.button("Ajouter la connaissance").clicked() {
+                        add_know = true;
+                    }
+                }
             });
         }
 
         if save {
-            self.apply(|c| nodes::update_text(c, id, &edit.title, &edit.summary, &edit.notes));
+            self.apply(|c| {
+                nodes::update_text(c, id, &edit.title, &edit.summary, &edit.notes)?;
+                match kind {
+                    Some(k) => fields::save(c, k, id, &edit.fields),
+                    None => Ok(()),
+                }
+            });
+        }
+        if let Some(k) = del_know {
+            self.apply(|c| knowledge::delete(c, k));
+        }
+        if add_know {
+            if let Some(subject) = self.know_form.subject {
+                let event = self.know_form.event;
+                if self.apply(|c| knowledge::add(c, id, subject, event)).is_some() {
+                    self.know_form = KnowForm::default();
+                }
+            }
         }
         if let Some(l) = del_link {
             self.apply(|c| links::delete(c, l));
@@ -535,6 +673,7 @@ impl eframe::App for StudioApp {
                 View::Kind(kind) => self.kind_view(ui, kind),
                 View::Timeline => self.timeline_view(ui),
                 View::Graph => self.graph_view(ui),
+                View::Alerts => self.alerts_view(ui),
             }
         });
     }
