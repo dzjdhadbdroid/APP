@@ -12,7 +12,7 @@ Un seul crate Rust · **egui/eframe** (interface) · **rusqlite** (SQLite embarq
 
 ## Arborescence
 ```
-migrations/                0001_core.sql (schéma noyau), 0002_character_fields.sql
+migrations/                0001_core.sql (noyau), 0002_character_fields.sql, 0003_history_search.sql
 src/
 ├─ main.rs                 point d'entrée, dossier de données, sauvegarde auto au lancement
 ├─ db/                     accès aux données
@@ -21,6 +21,8 @@ src/
 │  ├─ fields.rs            champs détaillés des fiches (table de définitions par type)
 │  ├─ knowledge.rs         ce que sait chaque personnage, et quand il l'apprend
 │  ├─ alerts.rs            alertes calculées, stockées, ignorables
+│  ├─ history.rs           versions d'une fiche (50 max), restauration réversible
+│  ├─ transfer.rs          export JSON/Markdown, import JSON atomique
 │  ├─ links.rs             liens typés, voisinage direct/indirect (CTE récursive)
 │  └─ timeline.rs          3 ordres : réel / diffusion / présentation
 ├─ consistency.rs          règles d'incohérence (Rust pur, testé)
@@ -30,6 +32,7 @@ src/
    ├─ mod.rs               navigation, tableau de bord, fiches, recherche
    ├─ graph_view.rs        Module 12 : Universe Map
    ├─ alerts_view.rs       alertes de cohérence
+   ├─ data_view.rs         sauvegardes, restauration, export, import
    └─ timeline_view.rs     Module 13 : Story Timeline
 ```
 
@@ -42,13 +45,15 @@ src/
 | Alertes de cohérence : connaissance préalable, relations contradictoires, ignorables | écrit |
 | Universe Map : zoom/déplacement, filtres, exploration, isolés, surlignage | écrit |
 | Timeline : chronologie réelle, diffusion (réordonnable), scènes, filtre par élément | écrit |
-| Sauvegarde auto (10 conservées) + manuelle | écrit |
+| Sauvegarde auto (10 conservées) + manuelle, restauration d'une sauvegarde (avec sauvegarde de sécurité) | écrit |
+| Historique des modifications d'une fiche + restauration réversible | écrit |
+| Export JSON complet, export Markdown, import JSON (additif, atomique) | écrit |
+| Recherche dans les champs détaillés et les dialogues | écrit |
 | Éditeur de scénario structuré (actes/séquences/dialogues) | **à faire** (scène = texte libre pour l'instant) |
 | Autres règles d'incohérence (objet qui disparaît, lieu impossible, événement mentionné avant d'avoir lieu) | **à faire** |
-| Recherche dans les champs détaillés et les dialogues | **à faire** (l'index couvre titre, résumé, notes) |
 | Sous-lieux (hiérarchie) dans l'UI | **à faire** (colonne `parent_id` prête) |
 | Chronologie comparative de plusieurs personnages, vue saison | **à faire** |
-| Historique des modifications / restauration, export JSON/Markdown/PDF, import | **à faire** |
+| Export PDF | **à faire** |
 | Module IA (trait `LlmProvider`, validation humaine) | **à faire** |
 
 ## Limites actuelles

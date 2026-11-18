@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use rusqlite::{params, Connection};
 
-use super::{DbError, DbResult};
+use super::{Atomic, DbError, DbResult};
 use crate::consistency::{self, KnowledgeFact, LinkFact, NodeFact};
 
 #[derive(Debug, Clone)]
@@ -54,7 +54,7 @@ pub fn refresh(conn: &Connection) -> DbResult<()> {
         .map(|f| (f.code.to_string(), f.node_id, f.message.clone()))
         .collect();
 
-    let tx = conn.unchecked_transaction()?;
+    let tx = Atomic::begin(conn)?;
     let existing: Vec<(i64, String, Option<i64>, String)> = tx
         .prepare("SELECT id, code, node_id, message FROM alerts")?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?

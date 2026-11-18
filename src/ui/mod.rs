@@ -3,6 +3,7 @@
 //! Universe Map, Timeline et fiches voient donc les modifications immédiatement.
 
 mod alerts_view;
+mod data_view;
 mod graph_view;
 mod timeline_view;
 
@@ -16,6 +17,7 @@ use crate::db::{
     self,
     alerts::{self, AlertRow},
     fields::{self, FieldKind},
+    history::{self, VersionRow},
     knowledge::{self, KnowledgeRow},
     links::{self, Link},
     nodes::{self, Node, NodeKind},
@@ -71,6 +73,7 @@ enum View {
     Timeline,
     Graph,
     Alerts,
+    Data,
 }
 
 struct Edit {
@@ -111,6 +114,8 @@ pub struct StudioApp {
     know_form: KnowForm,
     alerts: Vec<AlertRow>,
     show_ignored: bool,
+    import_path: String,
+    confirm_restore: Option<PathBuf>,
     graph: graph_view::GraphState,
     timeline: timeline_view::TimelineState,
 }
@@ -133,6 +138,8 @@ impl StudioApp {
             know_form: KnowForm::default(),
             alerts: Vec::new(),
             show_ignored: false,
+            import_path: String::new(),
+            confirm_restore: None,
             graph: graph_view::GraphState::new(),
             timeline: timeline_view::TimelineState::default(),
         };
@@ -248,6 +255,7 @@ impl StudioApp {
             ("Chronologie".to_string(), View::Timeline),
             ("Graphe de l'univers".to_string(), View::Graph),
             (format!("Alertes ({open_alerts})"), View::Alerts),
+            ("Données et sauvegardes".to_string(), View::Data),
         ];
         for (label, v) in items {
             if ui.selectable_label(self.view == v, label).clicked() {
@@ -438,6 +446,8 @@ impl StudioApp {
             Some(k) => fields::defs(k),
             None => &[],
         };
+        let versions: Vec<VersionRow> = history::list(&self.conn, id).unwrap_or_default();
+        let mut restore: Option<i64> = None;
         let know: Vec<KnowledgeRow> = if kind == Some(NodeKind::Character) {
             knowledge::for_character(&self.conn, id).unwrap_or_default()
         } else {
@@ -558,6 +568,23 @@ impl StudioApp {
                     add_link = true;
                 }
 
+                ui.separator();
+                egui::CollapsingHeader::new(format!("Historique des modifications ({})", versions.len()))
+                    .id_salt("history")
+                    .show(ui, |ui| {
+                        if versions.is_empty() {
+                            ui.label("Aucune version antérieure.");
+                        }
+                        for v in &versions {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("{} — {}", v.saved_at, v.title));
+                                if ui.small_button("Restaurer").clicked() {
+                                    restore = Some(v.id);
+                                }
+                            });
+                        }
+                    });
+
                 if kind == Some(NodeKind::Character) {
                     ui.separator();
                     ui.heading("Connaissances");
@@ -602,13 +629,16 @@ impl StudioApp {
         }
 
         if save {
+            // Archive l'état précédent s'il y a un changement, puis enregistre.
             self.apply(|c| {
-                nodes::update_text(c, id, &edit.title, &edit.summary, &edit.notes)?;
-                match kind {
-                    Some(k) => fields::save(c, k, id, &edit.fields),
-                    None => Ok(()),
-                }
+                history::save_node(c, id, &edit.title, &edit.summary, &edit.notes, &edit.fields)
             });
+        }
+        if let Some(version) = restore {
+            if self.apply(|c| history::restore(c, version)).is_some() {
+                self.select(id); // recharge la fiche restaurée
+                return;
+            }
         }
         if let Some(k) = del_know {
             self.apply(|c| knowledge::delete(c, k));
@@ -674,6 +704,7 @@ impl eframe::App for StudioApp {
                 View::Timeline => self.timeline_view(ui),
                 View::Graph => self.graph_view(ui),
                 View::Alerts => self.alerts_view(ui),
+                View::Data => self.data_view(ui),
             }
         });
     }

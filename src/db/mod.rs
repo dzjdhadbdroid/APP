@@ -3,10 +3,12 @@
 pub mod alerts;
 pub mod error;
 pub mod fields;
+pub mod history;
 pub mod knowledge;
 pub mod links;
 pub mod nodes;
 pub mod timeline;
+pub mod transfer;
 
 use std::path::Path;
 
@@ -14,10 +16,46 @@ use rusqlite::Connection;
 
 pub use error::{DbError, DbResult};
 
+/// Bloc atomique imbriquable (SAVEPOINT) : tout est annulé si `commit` n'est pas atteint
+/// (retour anticipé par `?`, erreur…). Se comporte comme une `&Connection`.
+pub struct Atomic<'a> {
+    conn: &'a Connection,
+    done: bool,
+}
+
+impl<'a> Atomic<'a> {
+    pub fn begin(conn: &'a Connection) -> DbResult<Self> {
+        conn.execute_batch("SAVEPOINT atomic_op")?;
+        Ok(Self { conn, done: false })
+    }
+
+    pub fn commit(mut self) -> DbResult<()> {
+        self.done = true;
+        self.conn.execute_batch("RELEASE atomic_op")?;
+        Ok(())
+    }
+}
+
+impl std::ops::Deref for Atomic<'_> {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        self.conn
+    }
+}
+
+impl Drop for Atomic<'_> {
+    fn drop(&mut self) {
+        if !self.done {
+            let _ = self.conn.execute_batch("ROLLBACK TO atomic_op; RELEASE atomic_op");
+        }
+    }
+}
+
 /// Migrations ordonnées. La version appliquée est stockée dans `PRAGMA user_version`.
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("../../migrations/0001_core.sql")),
     (2, include_str!("../../migrations/0002_character_fields.sql")),
+    (3, include_str!("../../migrations/0003_history_search.sql")),
 ];
 
 pub fn open(path: &Path) -> DbResult<Connection> {
@@ -58,18 +96,47 @@ pub fn backup(conn: &Connection, dest: &Path) -> DbResult<()> {
     Ok(())
 }
 
-fn unix_secs() -> u64 {
+pub(crate) fn unix_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
 }
 
-/// Sauvegarde manuelle horodatée dans `<dir>/backups/`. Retourne le chemin créé.
-pub fn manual_backup(conn: &Connection, dir: &Path) -> DbResult<std::path::PathBuf> {
-    let path = dir.join("backups").join(format!("manuel_{:012}.sqlite", unix_secs()));
+/// Sauvegarde horodatée `<prefixe>_<secondes>.sqlite` dans `<dir>/backups/`.
+pub fn backup_with_prefix(conn: &Connection, dir: &Path, prefix: &str) -> DbResult<std::path::PathBuf> {
+    let path = dir.join("backups").join(format!("{prefix}_{:012}.sqlite", unix_secs()));
     backup(conn, &path)?;
     Ok(path)
+}
+
+/// Sauvegarde manuelle horodatée dans `<dir>/backups/`. Retourne le chemin créé.
+pub fn manual_backup(conn: &Connection, dir: &Path) -> DbResult<std::path::PathBuf> {
+    backup_with_prefix(conn, dir, "manuel")
+}
+
+/// Sauvegardes existantes, de la plus récente à la plus ancienne.
+pub fn list_backups(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut v: Vec<std::path::PathBuf> = std::fs::read_dir(dir.join("backups"))
+        .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).collect())
+        .unwrap_or_default();
+    v.retain(|p| p.extension().is_some_and(|e| e == "sqlite"));
+    v.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    v
+}
+
+/// Remplace tout le contenu de la base ouverte par celui d'une sauvegarde, puis la met à niveau.
+/// Le fichier est vérifié avant : un fichier quelconque ne peut pas écraser la base.
+pub fn restore(conn: &mut Connection, from: &Path) -> DbResult<()> {
+    {
+        let src = Connection::open_with_flags(from, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        src.query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get::<_, i64>(0))
+            .map_err(|_| DbError::Invalid("ce fichier n'est pas une sauvegarde Sitcom Studio".into()))?;
+        let b = rusqlite::backup::Backup::new(&src, &mut *conn)?;
+        b.run_to_completion(64, std::time::Duration::from_millis(0), None)?;
+    }
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    migrate(conn)
 }
 
 /// Sauvegarde automatique (au lancement) ; ne conserve que les `keep` plus récentes.
@@ -114,6 +181,25 @@ mod tests {
     }
 
     #[test]
+    fn restore_brings_back_the_saved_state_and_rejects_junk() {
+        let mut conn = open_in_memory().unwrap();
+        nodes::create(&conn, nodes::NodeKind::Character, "Alice").unwrap();
+        let dir = std::env::temp_dir().join(format!("sitcom_restore_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let saved = manual_backup(&conn, &dir).unwrap();
+        nodes::create(&conn, nodes::NodeKind::Character, "Bob").unwrap();
+        assert_eq!(nodes::all(&conn).unwrap().len(), 2);
+        restore(&mut conn, &saved).unwrap();
+        let titles: Vec<_> = nodes::all(&conn).unwrap().into_iter().map(|n| n.title).collect();
+        assert_eq!(titles, ["Alice"]);
+        let junk = dir.join("junk.sqlite");
+        std::fs::write(&junk, b"pas une base").unwrap();
+        assert!(restore(&mut conn, &junk).is_err());
+        assert_eq!(nodes::all(&conn).unwrap().len(), 1); // base intacte
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn backup_produces_a_readable_copy() {
         let conn = open_in_memory().unwrap();
         nodes::create(&conn, nodes::NodeKind::Character, "Alice").unwrap();
@@ -134,7 +220,7 @@ mod tests {
         let v: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 2);
+        assert_eq!(v, 3);
     }
 
     #[test]
@@ -150,7 +236,7 @@ mod tests {
             conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap(),
             conn.query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0)).unwrap(),
         );
-        assert_eq!((v, n), (2, 1));
+        assert_eq!((v, n), (3, 1));
         conn.execute("UPDATE characters SET evolution = 'x' WHERE id = 1", []).unwrap(); // colonne ajoutée
     }
 }

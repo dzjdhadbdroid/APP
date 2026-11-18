@@ -161,8 +161,16 @@ pub fn save(conn: &Connection, kind: NodeKind, id: i64, values: &[String]) -> Db
     if n == 0 {
         return Err(DbError::NotFound(id));
     }
-    // Fait remonter la date de modification (tableau de bord « derniers modifiés »).
-    conn.execute("UPDATE nodes SET title = title WHERE id = ?1", [id])?;
+    // Texte libre des champs, indexé pour la recherche globale (descriptions, dialogues…).
+    // Met aussi à jour la date de modification (tableau de bord « derniers modifiés »).
+    let body = d
+        .iter()
+        .zip(values)
+        .filter(|(f, v)| !matches!(f.kind, FieldKind::Choice(_)) && !v.is_empty())
+        .map(|(_, v)| v.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    conn.execute("UPDATE nodes SET body = ?2 WHERE id = ?1", rusqlite::params![id, body])?;
     Ok(())
 }
 
@@ -200,6 +208,15 @@ mod tests {
         save(&conn, NodeKind::Episode, ep, &v).unwrap();
         save(&conn, NodeKind::Scene, sc, &["ALICE : Salut !".to_string()]).unwrap();
         assert_eq!(load(&conn, NodeKind::Scene, sc).unwrap()[0], "ALICE : Salut !");
+    }
+
+    #[test]
+    fn detailed_fields_are_searchable() {
+        let conn = open_in_memory().unwrap();
+        let ep = nodes::create_episode(&conn, "Pilote", 1, 1).unwrap();
+        let sc = nodes::create_scene(&conn, ep, "s", 1).unwrap();
+        save(&conn, NodeKind::Scene, sc, &["ALICE : Quelle surprise !".to_string()]).unwrap();
+        assert_eq!(nodes::search_text(&conn, "surprise").unwrap().len(), 1);
     }
 
     #[test]

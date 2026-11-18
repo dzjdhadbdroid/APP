@@ -5,7 +5,7 @@
 
 use rusqlite::{params, Connection};
 
-use super::{DbError, DbResult};
+use super::{Atomic, DbError, DbResult};
 use crate::story_date;
 
 #[derive(Debug, Clone)]
@@ -114,7 +114,7 @@ pub fn list_air(conn: &Connection) -> DbResult<Vec<AirRow>> {
 
 /// Échange l'ordre de diffusion de deux épisodes (déplacement dans la chronologie).
 pub fn swap_air_order(conn: &Connection, a: i64, b: i64) -> DbResult<()> {
-    let tx = conn.unchecked_transaction()?;
+    let tx = Atomic::begin(conn)?;
     let get = |id: i64| -> DbResult<i64> {
         tx.query_row("SELECT air_order FROM episodes WHERE id = ?1", [id], |r| {
             r.get::<_, Option<i64>>(0)

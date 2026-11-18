@@ -3,7 +3,7 @@
 use rusqlite::{params, Connection, Row};
 use serde::{Deserialize, Serialize};
 
-use super::{DbError, DbResult};
+use super::{Atomic, DbError, DbResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -130,7 +130,7 @@ pub fn create(conn: &Connection, kind: NodeKind, title: &str) -> DbResult<i64> {
             kind.as_str()
         )));
     }
-    let tx = conn.unchecked_transaction()?;
+    let tx = Atomic::begin(conn)?;
     let id = insert_node(&tx, kind, title)?;
     tx.execute(
         &format!("INSERT INTO {} (id) VALUES (?1)", kind.detail_table()),
@@ -142,7 +142,7 @@ pub fn create(conn: &Connection, kind: NodeKind, title: &str) -> DbResult<i64> {
 
 /// Crée un épisode ; l'ordre de diffusion initial est « à la suite » des existants.
 pub fn create_episode(conn: &Connection, title: &str, season: i64, number: i64) -> DbResult<i64> {
-    let tx = conn.unchecked_transaction()?;
+    let tx = Atomic::begin(conn)?;
     let id = insert_node(&tx, NodeKind::Episode, title)?;
     tx.execute(
         "INSERT INTO episodes (id, season, number, air_order)
@@ -205,7 +205,7 @@ pub fn create_scene(
     title: &str,
     position: i64,
 ) -> DbResult<i64> {
-    let tx = conn.unchecked_transaction()?;
+    let tx = Atomic::begin(conn)?;
     let id = insert_node(&tx, NodeKind::Scene, title)?;
     tx.execute(
         "INSERT INTO scenes (id, episode_id, position) VALUES (?1, ?2, ?3)",
@@ -254,7 +254,7 @@ pub fn update_text(
 
 /// Supprime le nœud ; fiche de détail, liens et index de recherche suivent (cascade/triggers).
 pub fn delete(conn: &Connection, id: i64) -> DbResult<()> {
-    let tx = conn.unchecked_transaction()?;
+    let tx = Atomic::begin(conn)?;
     // Les scènes d'un épisode sont aussi des nœuds : la cascade SQL ne supprimerait que
     // leur ligne de détail, laissant des nœuds orphelins. On les supprime explicitement.
     tx.execute(
