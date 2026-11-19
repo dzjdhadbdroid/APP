@@ -60,6 +60,14 @@ pub fn save_node(
     tx.commit()
 }
 
+/// Ajoute du texte à la fin des notes d'une fiche (version précédente archivée, donc annulable).
+pub fn append_note(conn: &Connection, id: i64, addition: &str) -> DbResult<()> {
+    let n = nodes::get(conn, id)?;
+    let f = fields::load(conn, n.kind, id)?;
+    let notes = if n.notes.is_empty() { addition.to_string() } else { format!("{}\n\n{addition}", n.notes) };
+    save_node(conn, id, &n.title, &n.summary, &notes, &f)
+}
+
 /// Versions archivées d'une fiche, de la plus récente à la plus ancienne.
 pub fn list(conn: &Connection, node_id: i64) -> DbResult<Vec<VersionRow>> {
     let mut stmt = conn.prepare(
@@ -120,6 +128,17 @@ mod tests {
         assert_eq!((n.title.as_str(), n.summary.as_str()), ("Alice", ""));
         assert_eq!(fields::load(&conn, NodeKind::Character, id).unwrap()[0], "");
         assert_eq!(list(&conn, id).unwrap().len(), 3); // la restauration est réversible
+    }
+
+    #[test]
+    fn appending_a_note_keeps_the_old_text_in_history() {
+        let conn = open_in_memory().unwrap();
+        let id = nodes::create(&conn, NodeKind::Plot, "Intrigue").unwrap();
+        let f = fields::load(&conn, NodeKind::Plot, id).unwrap();
+        save_node(&conn, id, "Intrigue", "", "note existante", &f).unwrap();
+        append_note(&conn, id, "[IA] idée").unwrap();
+        assert_eq!(nodes::get(&conn, id).unwrap().notes, "note existante\n\n[IA] idée");
+        assert_eq!(list(&conn, id).unwrap().len(), 2);
     }
 
     #[test]

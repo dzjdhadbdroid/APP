@@ -12,7 +12,7 @@ Un seul crate Rust · **egui/eframe** (interface) · **rusqlite** (SQLite embarq
 
 ## Arborescence
 ```
-migrations/                0001_core.sql (noyau), 0002_character_fields.sql, 0003_history_search.sql
+migrations/                0001_core.sql (noyau), 0002_character_fields.sql, 0003_history_search.sql, 0004_settings.sql
 src/
 ├─ main.rs                 point d'entrée, dossier de données, sauvegarde auto au lancement
 ├─ db/                     accès aux données
@@ -23,8 +23,13 @@ src/
 │  ├─ alerts.rs            alertes calculées, stockées, ignorables
 │  ├─ history.rs           versions d'une fiche (50 max), restauration réversible
 │  ├─ transfer.rs          export JSON/Markdown, import JSON atomique
+│  ├─ settings.rs          réglages clé/valeur
 │  ├─ links.rs             liens typés, voisinage direct/indirect (CTE récursive)
 │  └─ timeline.rs          3 ordres : réel / diffusion / présentation
+├─ ai/                     module IA (facultatif, hors ligne par défaut)
+│  ├─ prompt.rs            contexte, consignes, vérification des citations (Rust pur, testé)
+│  ├─ context.rs           construit le contexte depuis la base
+│  └─ provider.rs          Anthropic et API compatible OpenAI / modèle local
 ├─ consistency.rs          règles d'incohérence (Rust pur, testé)
 ├─ graph/layout.rs         placement par forces (Rust pur, testé)
 ├─ story_date.rs           dates fictives partielles → clé de tri (Rust pur, testé)
@@ -32,6 +37,7 @@ src/
    ├─ mod.rs               navigation, tableau de bord, fiches, recherche
    ├─ graph_view.rs        Module 12 : Universe Map
    ├─ alerts_view.rs       alertes de cohérence
+   ├─ ai_view.rs           assistant IA
    ├─ data_view.rs         sauvegardes, restauration, export, import
    └─ timeline_view.rs     Module 13 : Story Timeline
 ```
@@ -53,12 +59,12 @@ src/
 | Autres règles d'incohérence (objet qui disparaît, lieu impossible, événement mentionné avant d'avoir lieu) | **à faire** |
 | Sous-lieux (hiérarchie) dans l'UI | **à faire** (colonne `parent_id` prête) |
 | Chronologie comparative de plusieurs personnages, vue saison | **à faire** |
+| Assistant IA : contexte choisi, 11 tâches prédéfinies, citations vérifiées, jamais d'écriture automatique | écrit |
 | Export PDF | **à faire** |
-| Module IA (trait `LlmProvider`, validation humaine) | **à faire** |
 
 ## Limites actuelles
 Le réseau est coupé dans l'environnement de développement : `eframe` et `rusqlite` n'ont pas pu
 être téléchargés, donc **l'application complète n'a jamais été compilée**. Vérifié : syntaxe de
 tous les fichiers, tests réels de `graph/layout.rs`, `story_date.rs` et `consistency.rs` (compilés avec rustc),
-et toutes les requêtes SQL rejouées dans SQLite. Les tests Rust de `db/` et la compilation
+`ai/prompt.rs` (8 tests), et toutes les requêtes SQL rejouées dans SQLite. Les tests Rust de `db/` et la compilation
 de `ui/` restent à lancer : `cargo test` puis `cargo run`.

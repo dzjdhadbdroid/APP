@@ -2,6 +2,7 @@
 //! Toute écriture passe par `apply`, qui recharge aussitôt les données partagées :
 //! Universe Map, Timeline et fiches voient donc les modifications immédiatement.
 
+mod ai_view;
 mod alerts_view;
 mod data_view;
 mod graph_view;
@@ -24,28 +25,7 @@ use crate::db::{
     DbError, DbResult,
 };
 
-/// (code stocké en base, libellé affiché)
-pub const LINK_TYPES: [(&str, &str); 11] = [
-    ("relation", "relation entre personnages"),
-    ("lives_in", "habite"),
-    ("located_at", "se situe à"),
-    ("appears_in", "apparaît dans"),
-    ("contains", "contient"),
-    ("set_in", "se déroule dans"),
-    ("advances", "fait avancer"),
-    ("owns", "possède"),
-    ("involves", "implique"),
-    ("requires", "nécessite (connaissance préalable)"),
-    ("mentions", "mentionne"),
-];
-
-pub fn link_type_label(t: &str) -> &str {
-    LINK_TYPES
-        .iter()
-        .find(|(k, _)| *k == t)
-        .map(|(_, l)| *l)
-        .unwrap_or(t)
-}
+pub use crate::db::links::{link_type_label, LINK_TYPES};
 
 pub fn kind_color(kind: NodeKind) -> Color32 {
     match kind {
@@ -74,6 +54,7 @@ enum View {
     Graph,
     Alerts,
     Data,
+    Ai,
 }
 
 struct Edit {
@@ -116,12 +97,14 @@ pub struct StudioApp {
     show_ignored: bool,
     import_path: String,
     confirm_restore: Option<PathBuf>,
+    ai: ai_view::AiState,
     graph: graph_view::GraphState,
     timeline: timeline_view::TimelineState,
 }
 
 impl StudioApp {
     pub fn new(conn: Connection, data_dir: PathBuf) -> Self {
+        let ai = ai_view::AiState::load(&conn);
         let mut app = Self {
             conn,
             data_dir,
@@ -140,6 +123,7 @@ impl StudioApp {
             show_ignored: false,
             import_path: String::new(),
             confirm_restore: None,
+            ai,
             graph: graph_view::GraphState::new(),
             timeline: timeline_view::TimelineState::default(),
         };
@@ -255,6 +239,7 @@ impl StudioApp {
             ("Chronologie".to_string(), View::Timeline),
             ("Graphe de l'univers".to_string(), View::Graph),
             (format!("Alertes ({open_alerts})"), View::Alerts),
+            ("Assistant IA".to_string(), View::Ai),
             ("Données et sauvegardes".to_string(), View::Data),
         ];
         for (label, v) in items {
@@ -442,6 +427,7 @@ impl StudioApp {
         let (mut save, mut delete, mut add_scene, mut add_link) = (false, false, false, false);
         let (mut open, mut del_link) = (None, None);
         let (mut add_know, mut del_know) = (false, None);
+        let mut to_ai = false;
         let defs: &[fields::FieldDef] = match kind {
             Some(k) => fields::defs(k),
             None => &[],
@@ -508,6 +494,9 @@ impl StudioApp {
                     }
                     if ui.button("Supprimer").clicked() {
                         delete = true;
+                    }
+                    if ui.button("→ Assistant IA").clicked() {
+                        to_ai = true;
                     }
                     if kind == Some(NodeKind::Episode) && ui.button("+ Scène").clicked() {
                         add_scene = true;
@@ -679,6 +668,10 @@ impl StudioApp {
             return;
         }
         self.edit = Some(edit);
+        if to_ai {
+            self.ai.add_to_context(id);
+            self.view = View::Ai;
+        }
         if let Some(o) = open {
             self.go_to(o);
         }
@@ -687,6 +680,7 @@ impl StudioApp {
 
 impl eframe::App for StudioApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_ai(ctx);
         egui::SidePanel::left("nav")
             .exact_width(210.0)
             .show(ctx, |ui| self.sidebar(ui));
@@ -705,6 +699,7 @@ impl eframe::App for StudioApp {
                 View::Graph => self.graph_view(ui),
                 View::Alerts => self.alerts_view(ui),
                 View::Data => self.data_view(ui),
+                View::Ai => self.ai_view(ui),
             }
         });
     }

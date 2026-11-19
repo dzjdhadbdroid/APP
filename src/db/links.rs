@@ -28,6 +28,29 @@ fn from_row(row: &Row) -> rusqlite::Result<Link> {
     })
 }
 
+/// (code stocké en base, libellé affiché)
+pub const LINK_TYPES: [(&str, &str); 11] = [
+    ("relation", "relation entre personnages"),
+    ("lives_in", "habite"),
+    ("located_at", "se situe à"),
+    ("appears_in", "apparaît dans"),
+    ("contains", "contient"),
+    ("set_in", "se déroule dans"),
+    ("advances", "fait avancer"),
+    ("owns", "possède"),
+    ("involves", "implique"),
+    ("requires", "nécessite (connaissance préalable)"),
+    ("mentions", "mentionne"),
+];
+
+pub fn link_type_label(t: &str) -> &str {
+    LINK_TYPES
+        .iter()
+        .find(|(k, _)| *k == t)
+        .map(|(_, l)| *l)
+        .unwrap_or(t)
+}
+
 const COLS: &str = "id, src_id, dst_id, link_type, label, closeness, description";
 
 pub fn create(
