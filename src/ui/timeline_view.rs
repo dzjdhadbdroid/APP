@@ -16,6 +16,8 @@ enum Tab {
     Real,
     Air,
     Scenes,
+    Season,
+    Compare,
 }
 
 struct EvBuf {
@@ -30,6 +32,10 @@ pub struct TimelineState {
     /// Restreint la chronologie à un élément : personnage, intrigue, lieu, saison (épisode)…
     filter: Option<i64>,
     new_title: String,
+    from: String,
+    to: String,
+    season: i64,
+    compare: Vec<i64>,
     bufs: HashMap<i64, EvBuf>,
 }
 
@@ -40,12 +46,16 @@ impl StudioApp {
             ui.selectable_value(&mut self.timeline.tab, Tab::Real, "Chronologie réelle (univers)");
             ui.selectable_value(&mut self.timeline.tab, Tab::Air, "Ordre de diffusion");
             ui.selectable_value(&mut self.timeline.tab, Tab::Scenes, "Ordre des scènes");
+            ui.selectable_value(&mut self.timeline.tab, Tab::Season, "Par saison");
+            ui.selectable_value(&mut self.timeline.tab, Tab::Compare, "Comparer des personnages");
         });
         ui.separator();
         match self.timeline.tab {
             Tab::Real => self.real_timeline(ui),
             Tab::Air => self.air_timeline(ui),
             Tab::Scenes => self.scene_timeline(ui),
+            Tab::Season => self.season_timeline(ui),
+            Tab::Compare => self.compare_timeline(ui),
         }
     }
 
@@ -88,9 +98,22 @@ impl StudioApp {
             RichText::new("Dates : AAAA, AAAA-MM ou AAAA-MM-JJ. Un événement lié à un personnage ou une intrigue (fiche → Connexions) apparaît dans sa chronologie.")
                 .color(Color32::from_gray(130)),
         );
+        ui.horizontal(|ui| {
+            ui.label("Période : de");
+            ui.add(egui::TextEdit::singleline(&mut self.timeline.from).hint_text("AAAA-MM").desired_width(80.0));
+            ui.label("à");
+            ui.add(egui::TextEdit::singleline(&mut self.timeline.to).hint_text("AAAA-MM").desired_width(80.0));
+        });
         ui.add_space(6.0);
 
         let rows = timeline::list_events(&self.conn, self.timeline.filter).unwrap_or_default();
+        let rows = match timeline::in_period(rows, &self.timeline.from, &self.timeline.to) {
+            Ok(r) => r,
+            Err(e) => {
+                ui.colored_label(Color32::from_rgb(255, 120, 120), e.to_string());
+                Vec::new()
+            }
+        };
         let mut to_apply: Option<(i64, String, i64, String)> = None;
         let mut open = None;
 
@@ -219,6 +242,115 @@ impl StudioApp {
                     }
                 });
             }
+        });
+        if let Some(id) = open {
+            self.go_to(id);
+        }
+    }
+
+    /// Événements d'une saison : ceux reliés à l'un de ses épisodes.
+    fn season_timeline(&mut self, ui: &mut egui::Ui) {
+        let seasons = timeline::seasons(&self.conn).unwrap_or_default();
+        if seasons.is_empty() {
+            ui.label("Aucun épisode : crée-en pour voir une saison.");
+            return;
+        }
+        if !seasons.contains(&self.timeline.season) {
+            self.timeline.season = seasons[0];
+        }
+        ui.horizontal(|ui| {
+            for s in &seasons {
+                ui.selectable_value(&mut self.timeline.season, *s, format!("Saison {s}"));
+            }
+        });
+        ui.label(
+            RichText::new("Événements reliés (fiche → Connexions) à un épisode de la saison, dans l'ordre de l'univers.")
+                .color(Color32::from_gray(130)),
+        );
+        let rows = timeline::events_of_season(&self.conn, self.timeline.season).unwrap_or_default();
+        let mut open = None;
+        egui::ScrollArea::vertical().id_salt("season_events").show(ui, |ui| {
+            if rows.is_empty() {
+                ui.label("Aucun événement relié à cette saison.");
+            }
+            for r in &rows {
+                ui.horizontal(|ui| {
+                    ui.label(r.story_start.clone().unwrap_or_else(|| "non daté".into()));
+                    if ui.link(&r.title).clicked() {
+                        open = Some(r.id);
+                    }
+                });
+            }
+        });
+        if let Some(id) = open {
+            self.go_to(id);
+        }
+    }
+
+    /// Une colonne par personnage choisi ; une ligne par événement. Les événements partageant
+    /// une même date (simultanés) sont repérés dans la colonne « date ».
+    fn compare_timeline(&mut self, ui: &mut egui::Ui) {
+        let characters: Vec<(i64, String)> = self
+            .nodes
+            .iter()
+            .filter(|n| n.kind == NodeKind::Character)
+            .map(|n| (n.id, n.title.clone()))
+            .collect();
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Personnages :");
+            for (id, name) in &characters {
+                let mut on = self.timeline.compare.contains(id);
+                if ui.checkbox(&mut on, name).changed() {
+                    if on {
+                        self.timeline.compare.push(*id);
+                    } else {
+                        self.timeline.compare.retain(|c| c != id);
+                    }
+                }
+            }
+        });
+        self.timeline.compare.retain(|c| characters.iter().any(|(id, _)| id == c));
+        if self.timeline.compare.len() < 2 {
+            ui.label("Coche au moins deux personnages pour comparer leurs chronologies.");
+            return;
+        }
+        let chosen = self.timeline.compare.clone();
+        let per_char: Vec<Vec<i64>> = chosen
+            .iter()
+            .map(|c| {
+                timeline::list_events(&self.conn, Some(*c))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|e| e.id)
+                    .collect()
+            })
+            .collect();
+        let mut events = timeline::list_events(&self.conn, None).unwrap_or_default();
+        events.retain(|e| per_char.iter().any(|l| l.contains(&e.id)));
+        let mut open = None;
+        egui::ScrollArea::both().id_salt("compare_events").show(ui, |ui| {
+            egui::Grid::new("compare_grid").striped(true).show(ui, |ui| {
+                ui.label(RichText::new("Date").strong());
+                ui.label(RichText::new("Événement").strong());
+                for c in &chosen {
+                    ui.label(RichText::new(super::title_in(&self.nodes, *c)).strong());
+                }
+                ui.end_row();
+                for (i, e) in events.iter().enumerate() {
+                    let same = e.story_sort.is_some()
+                        && (events.get(i.wrapping_sub(1)).is_some_and(|p| p.story_sort == e.story_sort)
+                            || events.get(i + 1).is_some_and(|n| n.story_sort == e.story_sort));
+                    let date = e.story_start.clone().unwrap_or_else(|| "non daté".into());
+                    ui.label(if same { format!("{date} ⇄") } else { date });
+                    if ui.link(&e.title).clicked() {
+                        open = Some(e.id);
+                    }
+                    for list in &per_char {
+                        ui.label(if list.contains(&e.id) { "●" } else { "" });
+                    }
+                    ui.end_row();
+                }
+            });
         });
         if let Some(id) = open {
             self.go_to(id);

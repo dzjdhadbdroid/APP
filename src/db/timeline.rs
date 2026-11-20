@@ -84,6 +84,61 @@ pub fn set_event(
     Ok(())
 }
 
+/// Numéros de saison existants, croissants.
+pub fn seasons(conn: &Connection) -> DbResult<Vec<i64>> {
+    let mut stmt = conn.prepare("SELECT DISTINCT season FROM episodes ORDER BY season")?;
+    let rows = stmt.query_map([], |r| r.get(0))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// Événements reliés (dans un sens ou dans l'autre) à un épisode de la saison, ordre chronologique.
+pub fn events_of_season(conn: &Connection, season: i64) -> DbResult<Vec<EventRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT n.id, n.title, e.story_start, e.story_sort, e.importance, e.status
+         FROM events e JOIN nodes n ON n.id = e.id
+         WHERE EXISTS (
+               SELECT 1 FROM links l JOIN episodes ep
+                 ON ep.id = CASE WHEN l.src_id = n.id THEN l.dst_id ELSE l.src_id END
+               WHERE (l.src_id = n.id OR l.dst_id = n.id) AND ep.season = ?1)
+         ORDER BY e.story_sort IS NULL, e.story_sort, n.id",
+    )?;
+    let rows = stmt.query_map([season], |r| {
+        Ok(EventRow {
+            id: r.get(0)?,
+            title: r.get(1)?,
+            story_start: r.get(2)?,
+            story_sort: r.get(3)?,
+            importance: r.get(4)?,
+            status: r.get(5)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// Garde les événements dont la date tombe dans [from, to] (bornes AAAA[-MM[-JJ]], vides = ouvertes).
+/// Les événements non datés sont écartés dès qu'une borne est donnée.
+pub fn in_period(rows: Vec<EventRow>, from: &str, to: &str) -> DbResult<Vec<EventRow>> {
+    let parse = |s: &str| -> DbResult<Option<i64>> {
+        if s.trim().is_empty() {
+            return Ok(None);
+        }
+        story_date::sort_key(s)
+            .map(Some)
+            .ok_or_else(|| DbError::Invalid(format!("date « {s} » (formats : AAAA, AAAA-MM, AAAA-MM-JJ)")))
+    };
+    let (lo, hi) = (parse(from)?, parse(to)?);
+    if lo.is_none() && hi.is_none() {
+        return Ok(rows);
+    }
+    Ok(rows
+        .into_iter()
+        .filter(|r| {
+            r.story_sort
+                .is_some_and(|k| lo.map_or(true, |l| k >= l) && hi.map_or(true, |h| k <= h))
+        })
+        .collect())
+}
+
 #[derive(Debug, Clone)]
 pub struct AirRow {
     pub id: i64,
@@ -209,5 +264,31 @@ mod tests {
         let air: Vec<_> = list_air(&conn).unwrap().into_iter().map(|r| r.title).collect();
         assert_eq!(air, ["E2", "E1"]);
         assert_eq!(list_scenes(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn season_and_period_views() {
+        let conn = open_in_memory().unwrap();
+        let ep1 = nodes::create_episode(&conn, "E1", 1, 1).unwrap();
+        let ep2 = nodes::create_episode(&conn, "E2", 2, 1).unwrap();
+        let a = nodes::create(&conn, NodeKind::Event, "a").unwrap();
+        let b = nodes::create(&conn, NodeKind::Event, "b").unwrap();
+        let c = nodes::create(&conn, NodeKind::Event, "c").unwrap();
+        set_event(&conn, a, "1998-03", 3, "planned").unwrap();
+        set_event(&conn, b, "2001", 3, "planned").unwrap();
+        links::create(&conn, a, ep1, "mentions", None, None).unwrap();
+        links::create(&conn, ep2, b, "involves", None, None).unwrap();
+        assert_eq!(seasons(&conn).unwrap(), vec![1, 2]);
+        let s1: Vec<_> = events_of_season(&conn, 1).unwrap().into_iter().map(|e| e.title).collect();
+        let s2: Vec<_> = events_of_season(&conn, 2).unwrap().into_iter().map(|e| e.title).collect();
+        assert_eq!((s1, s2), (vec!["a".to_string()], vec!["b".to_string()]));
+        let all = list_events(&conn, None).unwrap();
+        assert_eq!(all.len(), 3);
+        let p = in_period(all.clone(), "1998", "1999-12").unwrap();
+        assert_eq!(p.len(), 1);
+        assert_eq!(in_period(all.clone(), "", "").unwrap().len(), 3);
+        assert_eq!(in_period(all.clone(), "1999", "").unwrap().len(), 1); // non daté écarté
+        assert!(in_period(all, "n'importe quoi", "").is_err());
+        let _ = c;
     }
 }

@@ -13,6 +13,7 @@ use super::{
     fields::{self, FieldKind},
     knowledge, links,
     nodes::{self, NodeKind},
+    script::{self, BlockType},
     timeline, Atomic, DbError, DbResult,
 };
 
@@ -50,11 +51,22 @@ pub fn export_json(conn: &Connection) -> DbResult<String> {
                     }))
                 },
             )?,
-            NodeKind::Scene => conn.query_row(
-                "SELECT episode_id, position FROM scenes WHERE id = ?1",
-                [n.id],
-                |r| Ok(json!({ "episode_id": r.get::<_, i64>(0)?, "position": r.get::<_, i64>(1)? })),
-            )?,
+            NodeKind::Scene => {
+                let mut v = conn.query_row(
+                    "SELECT episode_id, position FROM scenes WHERE id = ?1",
+                    [n.id],
+                    |r| Ok(json!({ "episode_id": r.get::<_, i64>(0)?, "position": r.get::<_, i64>(1)? })),
+                )?;
+                let (act, sequence) = script::structure(conn, n.id)?;
+                let blocks: Vec<Value> = script::list(conn, n.id)?
+                    .into_iter()
+                    .map(|b| json!({ "type": b.block_type.code(), "character": b.character_id, "text": b.text }))
+                    .collect();
+                v["act"] = json!(act);
+                v["sequence"] = json!(sequence);
+                v["blocks"] = json!(blocks);
+                v
+            }
             NodeKind::Event => conn.query_row(
                 "SELECT story_start, importance, status FROM events WHERE id = ?1",
                 [n.id],
@@ -209,6 +221,13 @@ pub fn import_json(conn: &Connection, source: &str) -> DbResult<ImportReport> {
         let position = nodes::next_scene_position(&tx, episode)?;
         let new = nodes::create_scene(&tx, episode, &text(v, "title"), position)?;
         fill(&tx, NodeKind::Scene, new, v)?;
+        let e = &v["extra"];
+        script::set_structure(&tx, new, e["act"].as_i64(), e["sequence"].as_i64())?;
+        for b in e["blocks"].as_array().unwrap_or(&empty) {
+            let ty = BlockType::parse(b["type"].as_str().unwrap_or("action")).unwrap_or(BlockType::Action);
+            let speaker = b["character"].as_i64().and_then(|o| map.get(&o)).copied();
+            script::add(&tx, new, ty, speaker, &text(b, "text"))?;
+        }
         map.insert(old, new);
         report.nodes += 1;
     }
@@ -257,6 +276,11 @@ pub fn export_markdown(conn: &Connection) -> DbResult<String> {
     let events: HashMap<i64, timeline::EventRow> =
         timeline::list_events(conn, None)?.into_iter().map(|e| (e.id, e)).collect();
 
+    let scenes = timeline::list_scenes(conn)?;
+    let scene_order: HashMap<i64, usize> = scenes.iter().enumerate().map(|(i, s)| (s.id, i)).collect();
+    let scene_info: HashMap<i64, (String, i64)> =
+        scenes.iter().map(|s| (s.id, (s.episode_title.clone(), s.position))).collect();
+
     let mut out = String::from("# Bible de la sitcom\n");
     for kind in [
         NodeKind::Character,
@@ -267,13 +291,21 @@ pub fn export_markdown(conn: &Connection) -> DbResult<String> {
         NodeKind::Object,
         NodeKind::Event,
     ] {
-        let list = nodes::list_by_kind(conn, kind)?;
+        let mut list = nodes::list_by_kind(conn, kind)?;
         if list.is_empty() {
             continue;
         }
+        if kind == NodeKind::Scene {
+            list.sort_by_key(|n| scene_order.get(&n.id).copied().unwrap_or(usize::MAX));
+        }
         out.push_str(&format!("\n## {}\n", kind.label_plural()));
         for n in list {
-            out.push_str(&format!("\n### {}\n", n.title));
+            match scene_info.get(&n.id) {
+                Some((episode, position)) => {
+                    out.push_str(&format!("\n### {episode} · scène {position} · {}\n", n.title))
+                }
+                None => out.push_str(&format!("\n### {}\n", n.title)),
+            }
             if let Some(e) = events.get(&n.id) {
                 let date = e.story_start.as_deref().unwrap_or("non daté");
                 out.push_str(&format!(
@@ -297,6 +329,17 @@ pub fn export_markdown(conn: &Connection) -> DbResult<String> {
                     _ => v,
                 };
                 out.push_str(&format!("\n**{}** : {}\n", d.label, shown));
+            }
+            if kind == NodeKind::Scene {
+                let (act, sequence) = script::structure(conn, n.id)?;
+                if act.is_some() || sequence.is_some() {
+                    let part = |label: &str, v: Option<i64>| v.map(|v| format!("**{label}** : {v}"));
+                    let both: Vec<String> = [part("Acte", act), part("Séquence", sequence)].into_iter().flatten().collect();
+                    out.push_str(&format!("\n{}\n", both.join(" · ")));
+                }
+                for b in script::list(conn, n.id)? {
+                    out.push_str(&format!("\n{}\n", script::block_markdown(&b)));
+                }
             }
             if !n.notes.is_empty() {
                 out.push_str(&format!("\n**Notes** : {}\n", n.notes));
@@ -362,6 +405,32 @@ mod tests {
         // un export de la copie contient autant d'éléments que l'original
         let again: Value = serde_json::from_str(&export_json(&b).unwrap()).unwrap();
         assert_eq!(again["nodes"].as_array().unwrap().len(), 5);
+    }
+
+    #[test]
+    fn script_blocks_structure_and_speakers_survive_export_import_and_reach_the_markdown() {
+        let a = open_in_memory().unwrap();
+        let alice = nodes::create(&a, NodeKind::Character, "Alice").unwrap();
+        let ep = nodes::create_episode(&a, "Pilote", 1, 1).unwrap();
+        let sc = nodes::create_scene(&a, ep, "Le dîner", 1).unwrap();
+        script::set_structure(&a, sc, Some(2), Some(3)).unwrap();
+        script::add(&a, sc, BlockType::Action, None, "Alice entre.").unwrap();
+        script::add(&a, sc, BlockType::Dialogue, Some(alice), "Bonsoir !").unwrap();
+        script::add(&a, sc, BlockType::Direction, None, "elle sourit").unwrap();
+
+        let b = open_in_memory().unwrap();
+        import_json(&b, &export_json(&a).unwrap()).unwrap();
+        let new_scene = timeline::list_scenes(&b).unwrap()[0].id;
+        assert_eq!(script::structure(&b, new_scene).unwrap(), (Some(2), Some(3)));
+        let blocks = script::list(&b, new_scene).unwrap();
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(blocks[1].character_title.as_deref(), Some("Alice")); // locuteur remappé
+        assert_eq!(nodes::search_text(&b, "Bonsoir").unwrap().len(), 1);
+
+        let md = export_markdown(&b).unwrap();
+        assert!(md.contains("### Pilote · scène 1 · Le dîner"));
+        assert!(md.contains("**Acte** : 2 · **Séquence** : 3"));
+        assert!(md.contains("**ALICE** : Bonsoir !") && md.contains("*(elle sourit)*"));
     }
 
     #[test]

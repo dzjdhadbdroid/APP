@@ -199,6 +199,17 @@ pub fn recent(conn: &Connection, limit: i64) -> DbResult<Vec<Node>> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Épisodes dont le statut est « plan » ou « en écriture », dans l'ordre de diffusion.
+pub fn episodes_in_progress(conn: &Connection) -> DbResult<Vec<(i64, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT n.id, n.title FROM episodes ep JOIN nodes n ON n.id = ep.id
+         WHERE ep.status IN ('outline', 'drafting')
+         ORDER BY ep.air_order IS NULL, ep.air_order, ep.season, ep.number",
+    )?;
+    let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
 pub fn create_scene(
     conn: &Connection,
     episode_id: i64,

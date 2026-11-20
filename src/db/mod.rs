@@ -7,6 +7,8 @@ pub mod history;
 pub mod knowledge;
 pub mod links;
 pub mod nodes;
+pub mod places;
+pub mod relations;
 pub mod script;
 pub mod settings;
 pub mod timeline;

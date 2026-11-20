@@ -6,6 +6,9 @@ mod ai_view;
 mod alerts_view;
 mod data_view;
 mod graph_view;
+mod relations_view;
+mod script_view;
+mod settings_view;
 mod timeline_view;
 
 use std::collections::HashSet;
@@ -22,6 +25,7 @@ use crate::db::{
     knowledge::{self, KnowledgeRow},
     links::{self, Link},
     nodes::{self, Node, NodeKind},
+    places,
     DbError, DbResult,
 };
 
@@ -50,11 +54,13 @@ fn title_in(nodes: &[Node], id: i64) -> &str {
 enum View {
     Dashboard,
     Kind(NodeKind),
+    Relations,
     Timeline,
     Graph,
     Alerts,
     Data,
     Ai,
+    Settings,
 }
 
 struct Edit {
@@ -98,6 +104,10 @@ pub struct StudioApp {
     import_path: String,
     confirm_restore: Option<PathBuf>,
     ai: ai_view::AiState,
+    detail_tab: script_view::DetailTab,
+    script: script_view::ScriptState,
+    rel: relations_view::RelState,
+    prefs: settings_view::Prefs,
     graph: graph_view::GraphState,
     timeline: timeline_view::TimelineState,
 }
@@ -105,6 +115,7 @@ pub struct StudioApp {
 impl StudioApp {
     pub fn new(conn: Connection, data_dir: PathBuf) -> Self {
         let ai = ai_view::AiState::load(&conn);
+        let prefs = settings_view::Prefs::load(&conn);
         let mut app = Self {
             conn,
             data_dir,
@@ -124,6 +135,10 @@ impl StudioApp {
             import_path: String::new(),
             confirm_restore: None,
             ai,
+            detail_tab: script_view::DetailTab::default(),
+            script: script_view::ScriptState::default(),
+            rel: relations_view::RelState::default(),
+            prefs,
             graph: graph_view::GraphState::new(),
             timeline: timeline_view::TimelineState::default(),
         };
@@ -208,6 +223,7 @@ impl StudioApp {
             self.search.clear();
             self.refresh_search();
             self.select(id);
+            self.remember_viewed(id);
         }
     }
 
@@ -231,6 +247,7 @@ impl StudioApp {
         let items = [
             ("Tableau de bord".to_string(), View::Dashboard),
             ("Personnages".to_string(), View::Kind(NodeKind::Character)),
+            ("Relations".to_string(), View::Relations),
             ("Lieux".to_string(), View::Kind(NodeKind::Place)),
             ("Épisodes".to_string(), View::Kind(NodeKind::Episode)),
             ("Intrigues".to_string(), View::Kind(NodeKind::Plot)),
@@ -241,6 +258,7 @@ impl StudioApp {
             (format!("Alertes ({open_alerts})"), View::Alerts),
             ("Assistant IA".to_string(), View::Ai),
             ("Données et sauvegardes".to_string(), View::Data),
+            ("Paramètres".to_string(), View::Settings),
         ];
         for (label, v) in items {
             if ui.selectable_label(self.view == v, label).clicked() {
@@ -287,6 +305,28 @@ impl StudioApp {
             }
         });
 
+        ui.add_space(12.0);
+        let in_progress = nodes::episodes_in_progress(&self.conn).unwrap_or_default();
+        ui.heading(format!("Épisodes en cours d'écriture ({})", in_progress.len()));
+        for (id, title) in &in_progress {
+            if ui.link(title).clicked() {
+                open = Some(*id);
+            }
+        }
+        if !self.prefs.recent.is_empty() {
+            ui.add_space(12.0);
+            ui.heading("Consultés récemment");
+            for id in self.prefs.recent.iter().take(8) {
+                if let Some(n) = self.nodes.iter().find(|n| n.id == *id) {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(n.kind.label()).color(kind_color(n.kind)));
+                        if ui.link(&n.title).clicked() {
+                            open = Some(n.id);
+                        }
+                    });
+                }
+            }
+        }
         ui.add_space(12.0);
         ui.heading("Derniers éléments modifiés");
         let mut recent: Vec<&Node> = self.nodes.iter().collect();
@@ -418,6 +458,9 @@ impl StudioApp {
     }
 
     fn detail_column(&mut self, ui: &mut egui::Ui) {
+        if self.script_tabs(ui) {
+            return; // onglet Scénario affiché
+        }
         let Some(mut edit) = self.edit.take() else {
             ui.label("Sélectionne ou crée un élément.");
             return;
@@ -428,6 +471,15 @@ impl StudioApp {
         let (mut open, mut del_link) = (None, None);
         let (mut add_know, mut del_know) = (false, None);
         let mut to_ai = false;
+        let mut new_parent: Option<Option<i64>> = None;
+        let (cur_parent, kids): (Option<i64>, Vec<(i64, String)>) = if kind == Some(NodeKind::Place) {
+            (
+                places::parent_of(&self.conn, id).unwrap_or(None),
+                places::children(&self.conn, id).unwrap_or_default(),
+            )
+        } else {
+            (None, Vec::new())
+        };
         let defs: &[fields::FieldDef] = match kind {
             Some(k) => fields::defs(k),
             None => &[],
@@ -502,6 +554,31 @@ impl StudioApp {
                         add_scene = true;
                     }
                 });
+
+                if kind == Some(NodeKind::Place) {
+                    ui.separator();
+                    ui.heading("Hiérarchie");
+                    let shown = cur_parent.map_or("(lieu principal)".to_string(), |p| title_in(nodes, p).to_string());
+                    ui.horizontal(|ui| {
+                        ui.label("Situé dans :");
+                        egui::ComboBox::from_id_salt("place_parent").selected_text(shown).show_ui(ui, |ui| {
+                            if ui.selectable_label(cur_parent.is_none(), "(lieu principal)").clicked() {
+                                new_parent = Some(None);
+                            }
+                            for n in nodes.iter().filter(|n| n.kind == NodeKind::Place && n.id != id) {
+                                if ui.selectable_label(cur_parent == Some(n.id), n.title.as_str()).clicked() {
+                                    new_parent = Some(Some(n.id));
+                                }
+                            }
+                        });
+                    });
+                    ui.label(format!("Sous-lieux ({})", kids.len()));
+                    for (kid, name) in &kids {
+                        if ui.link(format!("  ↳ {name}")).clicked() {
+                            open = Some(*kid);
+                        }
+                    }
+                }
 
                 ui.separator();
                 ui.heading("Connexions");
@@ -623,6 +700,9 @@ impl StudioApp {
                 history::save_node(c, id, &edit.title, &edit.summary, &edit.notes, &edit.fields)
             });
         }
+        if let Some(parent) = new_parent {
+            self.apply(|c| places::set_parent(c, id, parent));
+        }
         if let Some(version) = restore {
             if self.apply(|c| history::restore(c, version)).is_some() {
                 self.select(id); // recharge la fiche restaurée
@@ -680,6 +760,7 @@ impl StudioApp {
 
 impl eframe::App for StudioApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.prefs.apply(ctx);
         self.poll_ai(ctx);
         egui::SidePanel::left("nav")
             .exact_width(210.0)
@@ -695,11 +776,13 @@ impl eframe::App for StudioApp {
             match self.view {
                 View::Dashboard => self.dashboard(ui),
                 View::Kind(kind) => self.kind_view(ui, kind),
+                View::Relations => self.relations_view(ui),
                 View::Timeline => self.timeline_view(ui),
                 View::Graph => self.graph_view(ui),
                 View::Alerts => self.alerts_view(ui),
                 View::Data => self.data_view(ui),
                 View::Ai => self.ai_view(ui),
+                View::Settings => self.settings_view(ui),
             }
         });
     }
