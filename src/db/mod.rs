@@ -7,6 +7,7 @@ pub mod history;
 pub mod knowledge;
 pub mod links;
 pub mod nodes;
+pub mod script;
 pub mod settings;
 pub mod timeline;
 pub mod transfer;
@@ -58,6 +59,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (2, include_str!("../../migrations/0002_character_fields.sql")),
     (3, include_str!("../../migrations/0003_history_search.sql")),
     (4, include_str!("../../migrations/0004_settings.sql")),
+    (5, include_str!("../../migrations/0005_script.sql")),
 ];
 
 pub fn open(path: &Path) -> DbResult<Connection> {
@@ -222,7 +224,7 @@ mod tests {
         let v: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 4);
+        assert_eq!(v, 5);
     }
 
     #[test]
@@ -238,7 +240,7 @@ mod tests {
             conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap(),
             conn.query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0)).unwrap(),
         );
-        assert_eq!((v, n), (4, 1));
+        assert_eq!((v, n), (5, 1));
         conn.execute("UPDATE characters SET evolution = 'x' WHERE id = 1", []).unwrap(); // colonne ajoutée
     }
 }

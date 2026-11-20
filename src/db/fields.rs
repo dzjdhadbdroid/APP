@@ -101,7 +101,7 @@ const PLOT: &[FieldDef] = &[
     line("planned_resolution", "Résolution prévue"),
 ];
 const OBJECT: &[FieldDef] = &[text("description", "Description")];
-const SCENE: &[FieldDef] = &[text("content", "Contenu (actions, dialogues, mise en scène)")];
+const SCENE: &[FieldDef] = &[text("content", "Notes de scène / brouillon libre")];
 
 pub fn defs(kind: NodeKind) -> &'static [FieldDef] {
     match kind {
@@ -161,16 +161,34 @@ pub fn save(conn: &Connection, kind: NodeKind, id: i64, values: &[String]) -> Db
     if n == 0 {
         return Err(DbError::NotFound(id));
     }
-    // Texte libre des champs, indexé pour la recherche globale (descriptions, dialogues…).
-    // Met aussi à jour la date de modification (tableau de bord « derniers modifiés »).
-    let body = d
-        .iter()
-        .zip(values)
-        .filter(|(f, v)| !matches!(f.kind, FieldKind::Choice(_)) && !v.is_empty())
-        .map(|(_, v)| v.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-    conn.execute("UPDATE nodes SET body = ?2 WHERE id = ?1", rusqlite::params![id, body])?;
+    rebuild_body(conn, kind, id)
+}
+
+/// Recalcule le texte indexé pour la recherche globale : champs libres (descriptions…) et,
+/// pour une scène, les blocs de scénario (dialogues compris). Met aussi à jour la date de
+/// modification (tableau de bord « derniers modifiés »).
+pub fn rebuild_body(conn: &Connection, kind: NodeKind, id: i64) -> DbResult<()> {
+    let d = defs(kind);
+    let mut parts: Vec<String> = Vec::new();
+    if !d.is_empty() {
+        for (f, v) in d.iter().zip(load(conn, kind, id)?) {
+            if !matches!(f.kind, FieldKind::Choice(_)) && !v.is_empty() {
+                parts.push(v);
+            }
+        }
+    }
+    if kind == NodeKind::Scene {
+        let mut stmt = conn.prepare(
+            "SELECT COALESCE(n.title || ' : ', '') || b.text
+             FROM scene_blocks b LEFT JOIN nodes n ON n.id = b.character_id
+             WHERE b.scene_id = ?1 ORDER BY b.position",
+        )?;
+        let rows = stmt.query_map([id], |r| r.get::<_, String>(0))?;
+        for row in rows {
+            parts.push(row?);
+        }
+    }
+    conn.execute("UPDATE nodes SET body = ?2 WHERE id = ?1", rusqlite::params![id, parts.join("\n")])?;
     Ok(())
 }
 

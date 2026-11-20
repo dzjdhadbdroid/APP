@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::{params, Connection};
 
 use super::{Atomic, DbError, DbResult};
-use crate::consistency::{self, KnowledgeFact, LinkFact, NodeFact};
+use crate::consistency::{self, Facts, KnowledgeFact, LinkFact, NodeFact};
 
 #[derive(Debug, Clone)]
 pub struct AlertRow {
@@ -16,18 +16,31 @@ pub struct AlertRow {
     pub status: String,
 }
 
-fn load_facts(
-    conn: &Connection,
-) -> DbResult<(Vec<NodeFact>, HashMap<i64, Option<i64>>, Vec<LinkFact>, Vec<KnowledgeFact>)> {
+struct Loaded {
+    nodes: Vec<NodeFact>,
+    event_dates: HashMap<i64, Option<i64>>,
+    air_order: HashMap<i64, i64>,
+    place_parent: HashMap<i64, i64>,
+    links: Vec<LinkFact>,
+    knowledge: Vec<KnowledgeFact>,
+}
+
+fn load_facts(conn: &Connection) -> DbResult<Loaded> {
     let nodes = conn
         .prepare("SELECT id, title, kind FROM nodes")?
-        .query_map([], |r| {
-            Ok(NodeFact { id: r.get(0)?, title: r.get(1)?, is_character: r.get::<_, String>(2)? == "character" })
-        })?
+        .query_map([], |r| Ok(NodeFact { id: r.get(0)?, title: r.get(1)?, kind: r.get(2)? }))?
         .collect::<Result<Vec<_>, _>>()?;
-    let dates = conn
+    let event_dates = conn
         .prepare("SELECT id, story_sort FROM events")?
         .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?)))?
+        .collect::<Result<HashMap<_, _>, _>>()?;
+    let air_order = conn
+        .prepare("SELECT id, air_order FROM episodes WHERE air_order IS NOT NULL")?
+        .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?
+        .collect::<Result<HashMap<_, _>, _>>()?;
+    let place_parent = conn
+        .prepare("SELECT id, parent_id FROM places WHERE parent_id IS NOT NULL")?
+        .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?
         .collect::<Result<HashMap<_, _>, _>>()?;
     let links = conn
         .prepare("SELECT src_id, dst_id, link_type, label FROM links")?
@@ -41,14 +54,21 @@ fn load_facts(
             Ok(KnowledgeFact { character: r.get(0)?, subject: r.get(1)?, learned_event: r.get(2)? })
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    Ok((nodes, dates, links, knowledge))
+    Ok(Loaded { nodes, event_dates, air_order, place_parent, links, knowledge })
 }
 
 /// Recalcule les alertes : les nouvelles sont ajoutées, celles qui ne s'appliquent plus
 /// disparaissent, et celles que le scénariste a ignorées restent ignorées.
 pub fn refresh(conn: &Connection) -> DbResult<()> {
-    let (nodes, dates, links, knowledge) = load_facts(conn)?;
-    let findings = consistency::analyze(&nodes, &dates, &links, &knowledge);
+    let d = load_facts(conn)?;
+    let findings = consistency::analyze(&Facts {
+        nodes: &d.nodes,
+        event_dates: &d.event_dates,
+        air_order: &d.air_order,
+        place_parent: &d.place_parent,
+        links: &d.links,
+        knowledge: &d.knowledge,
+    });
     let wanted: HashSet<(String, i64, String)> = findings
         .iter()
         .map(|f| (f.code.to_string(), f.node_id, f.message.clone()))

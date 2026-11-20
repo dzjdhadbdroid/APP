@@ -18,9 +18,12 @@ impl StudioApp {
         ui.heading("Alertes de cohérence");
         ui.label(
             RichText::new(
-                "Recalculées à chaque modification. Pour la règle « connaissance préalable » : \
-                 relie un événement à ce qu'il nécessite (lien « nécessite »), relie les personnages \
-                 concernés (lien « implique »), puis renseigne dans leur fiche ce qu'ils apprennent et quand.",
+                "Recalculées à chaque modification, d'après les liens que tu crées dans les fiches :\n\
+                 • connaissance préalable : événement « nécessite » X, « implique » un personnage, dont la fiche indique quand il apprend X ;\n\
+                 • lieu interdit : scène « se déroule dans » un lieu, « implique » un personnage qui « ne doit pas être à » ce lieu (ou son lieu parent) ;\n\
+                 • mention anticipée : un événement daté « mentionne » un événement daté plus tard ;\n\
+                 • objet absent : l'objet « apparaît dans » des épisodes d'une intrigue (épisodes qui « font avancer » l'intrigue) avant et après un épisode où il manque ;\n\
+                 • relations contradictoires : deux libellés différents entre les mêmes personnages.",
             )
             .color(Color32::from_gray(130)),
         );

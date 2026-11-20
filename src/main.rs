@@ -4,6 +4,7 @@ mod ai;
 mod consistency;
 mod db;
 mod graph;
+mod pdf;
 mod story_date;
 mod ui;
 

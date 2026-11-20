@@ -20,7 +20,7 @@ fn open_folder(path: &Path) {
 
 impl StudioApp {
     /// Écrit un export dans `<données>/exports/` et indique où il se trouve.
-    fn write_export(&mut self, extension: &str, content: db::DbResult<String>) {
+    fn write_export(&mut self, extension: &str, content: db::DbResult<Vec<u8>>) {
         let result = content.and_then(|text| {
             let dir = self.data_dir.join("exports");
             std::fs::create_dir_all(&dir)?;
@@ -54,12 +54,17 @@ impl StudioApp {
                 };
             }
             if ui.button("Exporter en JSON (complet)").clicked() {
-                let content = transfer::export_json(&self.conn);
+                let content = transfer::export_json(&self.conn).map(String::into_bytes);
                 self.write_export("json", content);
             }
             if ui.button("Exporter en Markdown (lisible)").clicked() {
-                let content = transfer::export_markdown(&self.conn);
+                let content = transfer::export_markdown(&self.conn).map(String::into_bytes);
                 self.write_export("md", content);
+            }
+            if ui.button("Exporter en PDF").clicked() {
+                let content = transfer::export_markdown(&self.conn)
+                    .map(|md| crate::pdf::markdown_to_pdf("Bible de la sitcom", &md));
+                self.write_export("pdf", content);
             }
             if ui.button("Ouvrir le dossier des données").clicked() {
                 open_folder(&self.data_dir);
