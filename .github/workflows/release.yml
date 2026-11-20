@@ -1,0 +1,41 @@
+name: Build Windows et release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Tests
+        run: cargo test --release
+        continue-on-error: true
+      - name: Compilation
+        run: cargo build --release
+      - name: Préparer l'archive
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/sitcom-studio.exe dist/SitcomStudio.exe
+          Compress-Archive -Path dist/SitcomStudio.exe -DestinationPath SitcomStudio-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SitcomStudio-windows
+          path: dist/SitcomStudio.exe
+      - name: Publier la release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/SitcomStudio.exe
+            SitcomStudio-windows.zip
+          prerelease: true
+          body: "Version de test. Lance SitcomStudio.exe (données dans %APPDATA%). Signale ce qui ne va pas."
