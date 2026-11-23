@@ -12,7 +12,7 @@ Un seul crate Rust · **egui/eframe** (interface) · **rusqlite** (SQLite embarq
 
 ## Arborescence
 ```
-migrations/                0001_core.sql (noyau), 0002_character_fields.sql, 0003_history_search.sql, 0004_settings.sql, 0005_script.sql
+migrations/                0001_core.sql (noyau), 0002_character_fields.sql, 0003_history_search.sql, 0004_settings.sql, 0005_script.sql, 0006_character_role.sql
 src/
 ├─ main.rs                 point d'entrée, dossier de données, sauvegarde auto au lancement
 ├─ db/                     accès aux données
@@ -41,6 +41,7 @@ src/
    ├─ mod.rs               navigation, tableau de bord, fiches, recherche
    ├─ graph_view.rs        Module 12 : Universe Map
    ├─ alerts_view.rs       alertes de cohérence
+   ├─ nav.rs               barre principale (6 sections), navigation secondaire, onglets de page
    ├─ script_view.rs       onglet Scénario des scènes et des épisodes
    ├─ relations_view.rs    module Relations
    ├─ settings_view.rs     thème, zoom, éléments consultés récemment
@@ -65,6 +66,7 @@ src/
 | Éditeur de scénario structuré (actes, séquences, dialogues, mise en scène, ordre des scènes) | écrit |
 | Règles d'incohérence : connaissance, relations, événement mentionné trop tôt, lieu interdit, objet qui disparaît | écrit |
 | Sous-lieux (hiérarchie, anti-cycle, lien `contains` automatique) | écrit |
+| Navigation : barre supérieure, barre latérale Personnages (principaux / relations / secondaires) et Écriture (saisons repliables → épisodes) | écrit |
 | Module Relations (catégorie, proximité 0–10, évolution, ce que chacun sait) | écrit |
 | Chronologie : comparée (plusieurs personnages), par saison, filtre de période | écrit |
 | Tableau de bord : épisodes en cours, consultés récemment ; Paramètres (thème, zoom) | écrit |

@@ -199,6 +199,33 @@ pub fn recent(conn: &Connection, limit: i64) -> DbResult<Vec<Node>> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Personnage secondaire ? (faux pour tout autre élément)
+pub fn is_secondary(conn: &Connection, id: i64) -> DbResult<bool> {
+    let n: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM characters WHERE id = ?1 AND role = 'secondary'",
+        [id],
+        |r| r.get(0),
+    )?;
+    Ok(n > 0)
+}
+
+pub fn secondary_ids(conn: &Connection) -> DbResult<std::collections::HashSet<i64>> {
+    let mut stmt = conn.prepare("SELECT id FROM characters WHERE role = 'secondary'")?;
+    let rows = stmt.query_map([], |r| r.get(0))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+pub fn set_secondary(conn: &Connection, id: i64, secondary: bool) -> DbResult<()> {
+    let n = conn.execute(
+        "UPDATE characters SET role = ?2 WHERE id = ?1",
+        params![id, if secondary { "secondary" } else { "main" }],
+    )?;
+    if n == 0 {
+        return Err(DbError::NotFound(id));
+    }
+    Ok(())
+}
+
 /// Épisodes dont le statut est « plan » ou « en écriture », dans l'ordre de diffusion.
 pub fn episodes_in_progress(conn: &Connection) -> DbResult<Vec<(i64, String)>> {
     let mut stmt = conn.prepare(

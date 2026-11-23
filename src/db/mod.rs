@@ -62,6 +62,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (3, include_str!("../../migrations/0003_history_search.sql")),
     (4, include_str!("../../migrations/0004_settings.sql")),
     (5, include_str!("../../migrations/0005_script.sql")),
+    (6, include_str!("../../migrations/0006_character_role.sql")),
 ];
 
 pub fn open(path: &Path) -> DbResult<Connection> {
@@ -226,7 +227,7 @@ mod tests {
         let v: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 5);
+        assert_eq!(v, 6);
     }
 
     #[test]
@@ -242,7 +243,7 @@ mod tests {
             conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap(),
             conn.query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0)).unwrap(),
         );
-        assert_eq!((v, n), (5, 1));
+        assert_eq!((v, n), (6, 1));
         conn.execute("UPDATE characters SET evolution = 'x' WHERE id = 1", []).unwrap(); // colonne ajoutée
     }
 }

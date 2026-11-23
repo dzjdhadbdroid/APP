@@ -54,6 +54,8 @@ const EPISODE_STATUS: Options = &[
     ("final", "version finale"),
 ];
 
+const CHARACTER_ROLE: Options = &[("main", "principal"), ("secondary", "secondaire")];
+
 const CHARACTER: &[FieldDef] = &[
     line("first_name", "Prénom"),
     line("last_name", "Nom"),
@@ -81,6 +83,7 @@ const CHARACTER: &[FieldDef] = &[
     text("key_events", "Événements marquants"),
     text("long_term_goals", "Objectifs à long terme"),
     text("personality_changes", "Changements de personnalité"),
+    choice("role", "Rôle dans l'univers", CHARACTER_ROLE),
 ];
 const PLACE: &[FieldDef] = &[
     line("place_type", "Type de lieu"),

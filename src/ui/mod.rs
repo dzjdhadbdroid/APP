@@ -6,6 +6,7 @@ mod ai_view;
 mod alerts_view;
 mod data_view;
 mod graph_view;
+mod nav;
 mod relations_view;
 mod script_view;
 mod settings_view;
@@ -108,6 +109,8 @@ pub struct StudioApp {
     script: script_view::ScriptState,
     rel: relations_view::RelState,
     prefs: settings_view::Prefs,
+    section_view: [View; 6],
+    char_secondary: bool,
     graph: graph_view::GraphState,
     timeline: timeline_view::TimelineState,
 }
@@ -139,6 +142,8 @@ impl StudioApp {
             script: script_view::ScriptState::default(),
             rel: relations_view::RelState::default(),
             prefs,
+            section_view: nav::default_views(),
+            char_secondary: false,
             graph: graph_view::GraphState::new(),
             timeline: timeline_view::TimelineState::default(),
         };
@@ -220,59 +225,13 @@ impl StudioApp {
     fn go_to(&mut self, id: i64) {
         if let Some(kind) = self.nodes.iter().find(|n| n.id == id).map(|n| n.kind) {
             self.view = View::Kind(kind);
+            if kind == NodeKind::Character {
+                self.char_secondary = nodes::is_secondary(&self.conn, id).unwrap_or(false);
+            }
             self.search.clear();
             self.refresh_search();
             self.select(id);
             self.remember_viewed(id);
-        }
-    }
-
-    // ───────────────────────── barre latérale ─────────────────────────
-
-    fn sidebar(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(6.0);
-        ui.heading("Sitcom Studio");
-        ui.add_space(6.0);
-        let resp = ui.add(
-            egui::TextEdit::singleline(&mut self.search)
-                .hint_text("Recherche globale…")
-                .desired_width(f32::INFINITY),
-        );
-        if resp.changed() {
-            self.refresh_search();
-        }
-        ui.separator();
-
-        let open_alerts = self.alerts.iter().filter(|a| a.status == "open").count();
-        let items = [
-            ("Tableau de bord".to_string(), View::Dashboard),
-            ("Personnages".to_string(), View::Kind(NodeKind::Character)),
-            ("Relations".to_string(), View::Relations),
-            ("Lieux".to_string(), View::Kind(NodeKind::Place)),
-            ("Épisodes".to_string(), View::Kind(NodeKind::Episode)),
-            ("Intrigues".to_string(), View::Kind(NodeKind::Plot)),
-            ("Objets".to_string(), View::Kind(NodeKind::Object)),
-            ("Événements".to_string(), View::Kind(NodeKind::Event)),
-            ("Chronologie".to_string(), View::Timeline),
-            ("Graphe de l'univers".to_string(), View::Graph),
-            (format!("Alertes ({open_alerts})"), View::Alerts),
-            ("Assistant IA".to_string(), View::Ai),
-            ("Données et sauvegardes".to_string(), View::Data),
-            ("Paramètres".to_string(), View::Settings),
-        ];
-        for (label, v) in items {
-            if ui.selectable_label(self.view == v, label).clicked() {
-                self.view = v;
-                self.search.clear();
-                self.refresh_search();
-            }
-        }
-        ui.separator();
-        if ui.button("Sauvegarder maintenant").clicked() {
-            self.status = match db::manual_backup(&self.conn, &self.data_dir) {
-                Ok(p) => format!("Sauvegarde créée : {}", p.display()),
-                Err(e) => format!("Erreur de sauvegarde : {e}"),
-            };
         }
     }
 
@@ -369,7 +328,7 @@ impl StudioApp {
         });
 
         if let Some(v) = goto {
-            self.view = v;
+            self.switch_view(v);
         }
         if let Some(id) = open {
             self.go_to(id);
@@ -403,7 +362,8 @@ impl StudioApp {
     // ───────────────────────── modules à fiches ─────────────────────────
 
     fn kind_view(&mut self, ui: &mut egui::Ui, kind: NodeKind) {
-        ui.heading(kind.label_plural());
+        let secondary = kind == NodeKind::Character && self.char_secondary;
+        ui.heading(if secondary { "Personnages secondaires" } else { kind.label_plural() });
         ui.horizontal(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.new_title)
@@ -419,6 +379,13 @@ impl StudioApp {
                     NodeKind::Scene => Err(DbError::Invalid(
                         "une scène se crée depuis la fiche de son épisode".into(),
                     )),
+                    NodeKind::Character => {
+                        let id = nodes::create(c, kind, &title)?;
+                        if secondary {
+                            nodes::set_secondary(c, id, true)?;
+                        }
+                        Ok(id)
+                    }
                     _ => nodes::create(c, kind, &title),
                 });
                 if let Some(id) = created {
@@ -435,10 +402,13 @@ impl StudioApp {
     }
 
     fn list_column(&mut self, ui: &mut egui::Ui, kind: NodeKind) {
+        let secondary_ids = nodes::secondary_ids(&self.conn).unwrap_or_default();
+        let want_secondary = self.char_secondary;
         let items: Vec<(i64, String)> = self
             .nodes
             .iter()
             .filter(|n| n.kind == kind)
+            .filter(|n| kind != NodeKind::Character || secondary_ids.contains(&n.id) == want_secondary)
             .map(|n| (n.id, n.title.clone()))
             .collect();
         let mut clicked = None;
@@ -762,9 +732,12 @@ impl eframe::App for StudioApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.prefs.apply(ctx);
         self.poll_ai(ctx);
-        egui::SidePanel::left("nav")
-            .exact_width(210.0)
-            .show(ctx, |ui| self.sidebar(ui));
+        self.top_bar(ctx);
+        if self.has_sub_nav() {
+            egui::SidePanel::left("sub_nav")
+                .exact_width(230.0)
+                .show(ctx, |ui| self.sub_nav(ui));
+        }
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             ui.label(self.status.as_str());
         });
@@ -773,8 +746,10 @@ impl eframe::App for StudioApp {
                 self.search_view(ui);
                 return;
             }
+            self.page_tabs(ui);
             match self.view {
                 View::Dashboard => self.dashboard(ui),
+                View::Kind(NodeKind::Episode | NodeKind::Scene) => self.writing_workspace(ui),
                 View::Kind(kind) => self.kind_view(ui, kind),
                 View::Relations => self.relations_view(ui),
                 View::Timeline => self.timeline_view(ui),
@@ -785,5 +760,7 @@ impl eframe::App for StudioApp {
                 View::Settings => self.settings_view(ui),
             }
         });
+        let idx = nav::section_index(nav::section_of(self.view));
+        self.section_view[idx] = self.view;
     }
 }
