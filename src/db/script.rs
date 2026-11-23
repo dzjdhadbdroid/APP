@@ -315,6 +315,43 @@ pub fn block_markdown(b: &Block) -> String {
 }
 
 /// Lecture continue d'un épisode : actes, séquences, scènes et blocs.
+/// Le scénario d'un épisode, prêt pour la mise en page PDF.
+pub fn episode_items(conn: &Connection, episode_id: i64) -> DbResult<Vec<crate::pdf::ScriptItem>> {
+    use crate::pdf::ScriptItem;
+    let mut out = Vec::new();
+    let (mut last_act, mut last_seq) = (None, None);
+    for s in scenes_of(conn, episode_id)? {
+        if s.act != last_act {
+            if let Some(a) = s.act {
+                out.push(ScriptItem::Heading(format!("Acte {a}")));
+            }
+        }
+        if s.sequence != last_seq || s.act != last_act {
+            if let Some(q) = s.sequence {
+                out.push(ScriptItem::Heading(format!("Séquence {q}")));
+            }
+        }
+        (last_act, last_seq) = (s.act, s.sequence);
+        out.push(ScriptItem::Heading(format!(
+            "Scène {} — {}",
+            s.position, s.title
+        )));
+        for b in list(conn, s.id)? {
+            match b.block_type {
+                BlockType::Action => out.push(ScriptItem::Action(b.text)),
+                BlockType::Direction => out.push(ScriptItem::Direction(b.text)),
+                BlockType::Dialogue => {
+                    out.push(ScriptItem::Speaker(
+                        b.character_title.unwrap_or_else(|| "?".into()),
+                    ));
+                    out.push(ScriptItem::Dialogue(b.text));
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
 pub fn episode_text(conn: &Connection, episode_id: i64) -> DbResult<String> {
     let mut out = String::new();
     let (mut last_act, mut last_seq) = (None, None);

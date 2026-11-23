@@ -66,13 +66,22 @@ impl StudioApp {
         let scenes = script::scenes_of(&self.conn, episode).unwrap_or_default();
         let (mut swap, mut open, mut add_scene) = (None, None, false);
         let mut del_scene: Option<i64> = None;
+        let mut export_pdf = false;
         ui.label(
             RichText::new("Ordre de présentation des scènes de l'épisode. Ouvre une scène pour écrire son scénario.")
                 .color(Color32::from_gray(135)),
         );
-        if ui.button("+ Scène").clicked() {
-            add_scene = true;
-        }
+        ui.horizontal(|ui| {
+            if ui.button("+ Scène").clicked() {
+                add_scene = true;
+            }
+            if ui
+                .button("Exporter en PDF (mise en page scénario)")
+                .clicked()
+            {
+                export_pdf = true;
+            }
+        });
         egui::ScrollArea::vertical()
             .id_salt("episode_scenes")
             .show(ui, |ui| {
@@ -133,6 +142,12 @@ impl StudioApp {
                 Ok(scene)
             });
         }
+        if export_pdf {
+            let title = title_in(&self.nodes, episode).to_string();
+            let content = script::episode_items(&self.conn, episode)
+                .map(|items| crate::pdf::script_to_pdf(&title, &items));
+            self.write_export("scenario", "pdf", content);
+        }
         if let Some(id) = del_scene {
             self.confirm_delete = Some(Confirm::Node(id));
         }
@@ -160,6 +175,7 @@ impl StudioApp {
         ui.label(RichText::new(title_in(&self.nodes, scene)).strong());
         let mut apply_structure = false;
         let mut delete_scene = false;
+        let (mut focus, mut review) = (false, false);
         if let Some((_, act, seq)) = self.script.structure.as_mut() {
             ui.horizontal(|ui| {
                 ui.add(egui::DragValue::new(act).range(0..=99).prefix("Acte "));
@@ -171,7 +187,26 @@ impl StudioApp {
                 if ui.button("Supprimer la scène").clicked() {
                     delete_scene = true;
                 }
+                if ui
+                    .button("Mode concentré")
+                    .on_hover_text("Plein écran, sans menus (Échap pour sortir)")
+                    .clicked()
+                {
+                    focus = true;
+                }
+                if ui.button("→ Relire avec l'IA").clicked() {
+                    review = true;
+                }
             });
+        }
+        if focus {
+            self.focus = true;
+        }
+        if review {
+            self.ai.add_to_context(scene);
+            self.ai
+                .set_task(crate::ai::prompt::Task::EpisodeInconsistencies);
+            self.switch_view(super::View::Ai);
         }
         if delete_scene {
             self.confirm_delete = Some(Confirm::Node(scene));

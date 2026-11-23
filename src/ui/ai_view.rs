@@ -59,6 +59,10 @@ impl AiState {
         }
     }
 
+    pub fn set_task(&mut self, task: Task) {
+        self.task = task;
+    }
+
     /// Ajoute un élément au contexte (utilisé par le bouton « → Assistant IA » des fiches).
     pub fn add_to_context(&mut self, id: i64) {
         if !self.ctx.contains(&id) {

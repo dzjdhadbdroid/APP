@@ -319,6 +319,12 @@ impl StudioApp {
             });
             return;
         }
+        if self.focus {
+            if ui.button("← Quitter le mode concentré (Échap)").clicked() {
+                self.focus = false;
+            }
+            ui.separator();
+        }
         self.detail_column(ui);
     }
 }

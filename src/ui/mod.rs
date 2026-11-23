@@ -118,11 +118,42 @@ pub struct StudioApp {
     prefs: settings_view::Prefs,
     section_view: [View; 6],
     confirm_delete: Option<Confirm>,
+    focus: bool,
     tag_input: String,
     tag_filter: Option<i64>,
     char_secondary: bool,
     graph: graph_view::GraphState,
     timeline: timeline_view::TimelineState,
+}
+
+/// Éditeur d'un champ de fiche (ligne, texte long ou liste de choix).
+fn field_editor(ui: &mut egui::Ui, def: &fields::FieldDef, value: &mut String) {
+    ui.label(def.label);
+    match def.kind {
+        FieldKind::Line => {
+            ui.add(egui::TextEdit::singleline(value).desired_width(f32::INFINITY));
+        }
+        FieldKind::Text => {
+            ui.add(
+                egui::TextEdit::multiline(value)
+                    .desired_rows(3)
+                    .desired_width(f32::INFINITY),
+            );
+        }
+        FieldKind::Choice(options) => {
+            let shown = options
+                .iter()
+                .find(|(code, _)| *code == value.as_str())
+                .map_or("—", |(_, label)| *label);
+            egui::ComboBox::from_id_salt(def.column)
+                .selected_text(shown)
+                .show_ui(ui, |ui| {
+                    for (code, label) in options {
+                        ui.selectable_value(value, code.to_string(), *label);
+                    }
+                });
+        }
+    }
 }
 
 impl StudioApp {
@@ -154,6 +185,7 @@ impl StudioApp {
             prefs,
             section_view: nav::default_views(),
             confirm_delete: None,
+            focus: false,
             tag_input: String::new(),
             tag_filter: None,
             char_secondary: false,
@@ -686,33 +718,28 @@ impl StudioApp {
                         .desired_rows(6)
                         .desired_width(f32::INFINITY),
                 );
+                let mut groups: Vec<(&'static str, Vec<usize>)> = Vec::new();
                 for (i, def) in defs.iter().enumerate() {
-                    ui.label(def.label);
-                    let value = &mut edit.fields[i];
-                    match def.kind {
-                        FieldKind::Line => {
-                            ui.add(egui::TextEdit::singleline(value).desired_width(f32::INFINITY));
+                    let g = kind.map_or("", |k| fields::group(k, def.column));
+                    match groups.iter_mut().find(|(name, _)| *name == g) {
+                        Some((_, idx)) => idx.push(i),
+                        None => groups.push((g, vec![i])),
+                    }
+                }
+                for (n, (name, idxs)) in groups.iter().enumerate() {
+                    if name.is_empty() {
+                        for i in idxs {
+                            field_editor(ui, &defs[*i], &mut edit.fields[*i]);
                         }
-                        FieldKind::Text => {
-                            ui.add(
-                                egui::TextEdit::multiline(value)
-                                    .desired_rows(3)
-                                    .desired_width(f32::INFINITY),
-                            );
-                        }
-                        FieldKind::Choice(options) => {
-                            let shown = options
-                                .iter()
-                                .find(|(code, _)| *code == value.as_str())
-                                .map_or("—", |(_, label)| *label);
-                            egui::ComboBox::from_id_salt(def.column)
-                                .selected_text(shown)
-                                .show_ui(ui, |ui| {
-                                    for (code, label) in options {
-                                        ui.selectable_value(value, code.to_string(), *label);
-                                    }
-                                });
-                        }
+                    } else {
+                        egui::CollapsingHeader::new(RichText::new(*name).strong())
+                            .id_salt(("field_group", *name))
+                            .default_open(n == 0)
+                            .show(ui, |ui| {
+                                for i in idxs {
+                                    field_editor(ui, &defs[*i], &mut edit.fields[*i]);
+                                }
+                            });
                     }
                 }
                 ui.horizontal(|ui| {
@@ -956,8 +983,13 @@ impl eframe::App for StudioApp {
         self.prefs.apply(ctx);
         self.delete_dialog(ctx);
         self.poll_ai(ctx);
-        self.top_bar(ctx);
-        if self.has_sub_nav() {
+        if self.focus && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.focus = false;
+        }
+        if !self.focus {
+            self.top_bar(ctx);
+        }
+        if self.has_sub_nav() && !self.focus {
             egui::SidePanel::left("sub_nav")
                 .exact_width(240.0)
                 .frame(theme::bar_frame(ctx, egui::Margin::symmetric(12, 10)))

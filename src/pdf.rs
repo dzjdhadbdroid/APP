@@ -9,6 +9,7 @@ const MARGIN_BOTTOM: f32 = 64.0;
 const BODY: f32 = 11.0;
 
 struct Line {
+    x: f32,
     text: String,
     size: f32,
     bold: bool,
@@ -168,6 +169,7 @@ fn layout(title: &str, markdown: &str) -> Vec<Line> {
     let mut lines = Vec::new();
     for l in wrap(title, 24.0, true, max_w) {
         lines.push(Line {
+            x: MARGIN_X,
             text: l,
             size: 24.0,
             bold: true,
@@ -192,6 +194,7 @@ fn layout(title: &str, markdown: &str) -> Vec<Line> {
         };
         for (i, l) in wrap(&text, size, bold, max_w).into_iter().enumerate() {
             lines.push(Line {
+                x: MARGIN_X,
                 text: l,
                 size,
                 bold,
@@ -205,9 +208,93 @@ fn layout(title: &str, markdown: &str) -> Vec<Line> {
 }
 
 pub fn markdown_to_pdf(title: &str, markdown: &str) -> Vec<u8> {
-    // ── pagination : chaque page = liste de (x, y, ligne) ──
+    render(title, layout(title, markdown))
+}
+
+/// Élément d'un scénario, dans l'ordre de lecture.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ScriptItem {
+    /// Intertitre : acte, séquence ou scène.
+    Heading(String),
+    Action(String),
+    /// Nom du personnage qui va parler.
+    Speaker(String),
+    Dialogue(String),
+    /// Indication de mise en scène, entre parenthèses.
+    Direction(String),
+}
+
+/// PDF mis en page comme un scénario : actions au bord, nom du personnage décalé,
+/// dialogue en colonne étroite, indications entre parenthèses.
+pub fn script_to_pdf(title: &str, items: &[ScriptItem]) -> Vec<u8> {
+    let full = PAGE_W - 2.0 * MARGIN_X;
+    let mut lines: Vec<Line> = Vec::new();
+    for l in wrap(title, 24.0, true, full) {
+        lines.push(Line {
+            x: MARGIN_X,
+            text: l,
+            size: 24.0,
+            bold: true,
+            gap_before: 0.0,
+        });
+    }
+    let mut push =
+        |lines: &mut Vec<Line>, text: &str, x: f32, width: f32, bold: bool, size: f32, gap: f32| {
+            for (i, l) in wrap(text, size, bold, width).into_iter().enumerate() {
+                lines.push(Line {
+                    x,
+                    text: l,
+                    size,
+                    bold,
+                    gap_before: if i == 0 { gap } else { 0.0 },
+                });
+            }
+        };
+    for it in items {
+        match it {
+            ScriptItem::Heading(t) => push(
+                &mut lines,
+                &clean_upper(t),
+                MARGIN_X,
+                full,
+                true,
+                13.0,
+                18.0,
+            ),
+            ScriptItem::Action(t) => push(&mut lines, t, MARGIN_X, full, false, BODY, 8.0),
+            ScriptItem::Speaker(t) => push(
+                &mut lines,
+                &clean_upper(t),
+                MARGIN_X + 170.0,
+                200.0,
+                true,
+                BODY,
+                10.0,
+            ),
+            ScriptItem::Dialogue(t) => {
+                push(&mut lines, t, MARGIN_X + 90.0, 290.0, false, BODY, 0.0)
+            }
+            ScriptItem::Direction(t) => push(
+                &mut lines,
+                &format!("({})", t.trim().trim_matches(['(', ')'])),
+                MARGIN_X + 120.0,
+                260.0,
+                false,
+                BODY,
+                4.0,
+            ),
+        }
+    }
+    render(title, lines)
+}
+
+fn clean_upper(s: &str) -> String {
+    s.trim().to_uppercase()
+}
+
+fn render(title: &str, lines: Vec<Line>) -> Vec<u8> {
+    // ── pagination : chaque page = liste de (y, ligne) ──
     let mut pages: Vec<Vec<(f32, &Line)>> = vec![Vec::new()];
-    let lines = layout(title, markdown);
     let mut y = PAGE_H - MARGIN_TOP;
     for line in &lines {
         let leading = line.size * 1.3;
@@ -289,8 +376,9 @@ pub fn markdown_to_pdf(title: &str, markdown: &str) -> Vec<u8> {
             }
             let font = if line.bold { "F2" } else { "F1" };
             stream.push_str(&format!(
-                "BT /{font} {} Tf 1 0 0 1 {MARGIN_X} {:.2} Tm {} Tj ET\n",
+                "BT /{font} {} Tf 1 0 0 1 {:.2} {:.2} Tm {} Tj ET\n",
                 line.size,
+                line.x,
                 y,
                 pdf_string(&line.text)
             ));
@@ -420,5 +508,26 @@ mod tests {
     fn empty_input_still_gives_a_valid_one_page_pdf() {
         let t = as_text(&markdown_to_pdf("", ""));
         assert!(t.contains("/Count 1"));
+    }
+
+    #[test]
+    fn screenplay_layout_indents_speakers_and_dialogue() {
+        let items = vec![
+            ScriptItem::Heading("Scène 1 — Cuisine".into()),
+            ScriptItem::Action("Alice entre en trombe.".into()),
+            ScriptItem::Speaker("Alice".into()),
+            ScriptItem::Direction("essoufflée".into()),
+            ScriptItem::Dialogue("Vous n'allez jamais me croire !".into()),
+        ];
+        let pdf = script_to_pdf("Pilote", &items);
+        assert!(pdf.starts_with(b"%PDF-1.4"));
+        let text = as_text(&pdf);
+        assert!(
+            text.contains("ALICE") && text.contains("(essoufflée)") || text.contains("essouffl")
+        );
+        let raw = String::from_utf8_lossy(&pdf).to_string();
+        // le nom du personnage est décalé de 170 points par rapport à la marge
+        assert!(raw.contains(&format!("{:.2}", MARGIN_X + 170.0)));
+        assert!(raw.contains(&format!("{:.2}", MARGIN_X + 90.0)));
     }
 }

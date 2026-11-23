@@ -118,6 +118,23 @@ const PLOT: &[FieldDef] = &[
 const OBJECT: &[FieldDef] = &[text("description", "Description")];
 const SCENE: &[FieldDef] = &[text("content", "Notes de scène / brouillon libre")];
 
+/// Section d'une fiche où ranger un champ (vide = pas de sections). Sert à replier les fiches longues.
+pub fn group(kind: NodeKind, column: &str) -> &'static str {
+    if kind != NodeKind::Character {
+        return "";
+    }
+    match column {
+        "first_name" | "last_name" | "nickname" | "age" | "birth_date" | "profession" | "role" => {
+            "Identité"
+        }
+        "physical" | "style" => "Apparence",
+        "personality" | "habits" | "qualities" | "flaws" | "fears" | "desires"
+        | "contradictions" | "verbal_tics" | "catchphrases" | "behaviors" => "Personnalité",
+        "biography" | "initial_situation" | "secrets" | "key_events" => "Histoire",
+        _ => "Objectifs et évolution",
+    }
+}
+
 pub fn defs(kind: NodeKind) -> &'static [FieldDef] {
     match kind {
         NodeKind::Character => CHARACTER,

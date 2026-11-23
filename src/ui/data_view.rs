@@ -20,16 +20,65 @@ fn open_folder(path: &Path) {
 
 impl StudioApp {
     /// Écrit un export dans `<données>/exports/` et indique où il se trouve.
-    fn write_export(&mut self, extension: &str, content: db::DbResult<Vec<u8>>) {
+    pub(super) fn write_export(
+        &mut self,
+        stem: &str,
+        extension: &str,
+        content: db::DbResult<Vec<u8>>,
+    ) {
         let result = content.and_then(|text| {
             let dir = self.data_dir.join("exports");
             std::fs::create_dir_all(&dir)?;
-            let path = dir.join(format!("univers_{}.{extension}", db::unix_secs()));
+            let path = dir.join(format!("{stem}_{}.{extension}", db::unix_secs()));
             std::fs::write(&path, text)?;
             Ok(path)
         });
         self.status = match result {
             Ok(p) => format!("Export créé : {}", p.display()),
+            Err(e) => format!("Erreur d'export : {e}"),
+        };
+    }
+
+    /// Un dossier complet : JSON, bible en Markdown et PDF, et un PDF de scénario par épisode.
+    fn export_project(&mut self) {
+        let result: db::DbResult<std::path::PathBuf> = (|| -> db::DbResult<std::path::PathBuf> {
+            let dir = self
+                .data_dir
+                .join("exports")
+                .join(format!("projet_{}", db::unix_secs()));
+            std::fs::create_dir_all(dir.join("scenarios"))?;
+            std::fs::write(dir.join("univers.json"), transfer::export_json(&self.conn)?)?;
+            let md = transfer::export_markdown(&self.conn)?;
+            std::fs::write(
+                dir.join("bible.pdf"),
+                crate::pdf::markdown_to_pdf("Bible de la sitcom", &md),
+            )?;
+            std::fs::write(dir.join("bible.md"), md)?;
+            for e in db::timeline::list_air(&self.conn)? {
+                let items = db::script::episode_items(&self.conn, e.id)?;
+                if items.is_empty() {
+                    continue;
+                }
+                let title = format!("S{}E{} - {}", e.season, e.number, e.title);
+                let file: String = title
+                    .chars()
+                    .map(|c| {
+                        if c.is_alphanumeric() || c == '-' || c == ' ' {
+                            c
+                        } else {
+                            '_'
+                        }
+                    })
+                    .collect();
+                std::fs::write(
+                    dir.join("scenarios").join(format!("{file}.pdf")),
+                    crate::pdf::script_to_pdf(&title, &items),
+                )?;
+            }
+            Ok(dir)
+        })();
+        self.status = match result {
+            Ok(p) => format!("Projet exporté dans : {}", p.display()),
             Err(e) => format!("Erreur d'export : {e}"),
         };
     }
@@ -55,16 +104,19 @@ impl StudioApp {
             }
             if ui.button("Exporter en JSON (complet)").clicked() {
                 let content = transfer::export_json(&self.conn).map(String::into_bytes);
-                self.write_export("json", content);
+                self.write_export("univers", "json", content);
             }
             if ui.button("Exporter en Markdown (lisible)").clicked() {
                 let content = transfer::export_markdown(&self.conn).map(String::into_bytes);
-                self.write_export("md", content);
+                self.write_export("univers", "md", content);
             }
             if ui.button("Exporter en PDF").clicked() {
                 let content = transfer::export_markdown(&self.conn)
                     .map(|md| crate::pdf::markdown_to_pdf("Bible de la sitcom", &md));
-                self.write_export("pdf", content);
+                self.write_export("univers", "pdf", content);
+            }
+            if ui.button("Exporter tout le projet (dossier)").clicked() {
+                self.export_project();
             }
             if ui.button("Ouvrir le dossier des données").clicked() {
                 open_folder(&self.data_dir);
