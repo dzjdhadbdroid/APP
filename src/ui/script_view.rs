@@ -72,46 +72,48 @@ impl StudioApp {
         if ui.button("+ Scène").clicked() {
             add_scene = true;
         }
-        egui::ScrollArea::vertical().id_salt("episode_scenes").show(ui, |ui| {
-            if scenes.is_empty() {
-                ui.label("Aucune scène.");
-            }
-            for (i, s) in scenes.iter().enumerate() {
-                ui.horizontal(|ui| {
-                    ui.label(format!("{}.", s.position));
-                    if ui.link(&s.title).clicked() {
-                        open = Some(s.id);
-                    }
-                    let structure = match (s.act, s.sequence) {
-                        (Some(a), Some(q)) => format!("acte {a} · séquence {q}"),
-                        (Some(a), None) => format!("acte {a}"),
-                        (None, Some(q)) => format!("séquence {q}"),
-                        (None, None) => String::new(),
-                    };
-                    ui.label(RichText::new(structure).color(Color32::from_gray(135)));
-                    if i > 0 && ui.small_button("▲").clicked() {
-                        swap = Some((s.id, scenes[i - 1].id));
-                    }
-                    if i + 1 < scenes.len() && ui.small_button("▼").clicked() {
-                        swap = Some((s.id, scenes[i + 1].id));
-                    }
-                });
-            }
-            ui.add_space(8.0);
-            egui::CollapsingHeader::new("Lire l'épisode (scénario complet)").id_salt("episode_read").show(ui, |ui| {
-                match script::episode_text(&self.conn, episode) {
-                    Ok(text) if text.trim().is_empty() => {
-                        ui.label("Rien d'écrit pour l'instant.");
-                    }
-                    Ok(text) => {
-                        ui.monospace(text);
-                    }
-                    Err(e) => {
-                        ui.label(e.to_string());
-                    }
+        egui::ScrollArea::vertical()
+            .id_salt("episode_scenes")
+            .show(ui, |ui| {
+                if scenes.is_empty() {
+                    ui.label("Aucune scène.");
                 }
+                for (i, s) in scenes.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("{}.", s.position));
+                        if ui.link(&s.title).clicked() {
+                            open = Some(s.id);
+                        }
+                        let structure = match (s.act, s.sequence) {
+                            (Some(a), Some(q)) => format!("acte {a} · séquence {q}"),
+                            (Some(a), None) => format!("acte {a}"),
+                            (None, Some(q)) => format!("séquence {q}"),
+                            (None, None) => String::new(),
+                        };
+                        ui.label(RichText::new(structure).color(Color32::from_gray(135)));
+                        if i > 0 && ui.small_button("▲").clicked() {
+                            swap = Some((s.id, scenes[i - 1].id));
+                        }
+                        if i + 1 < scenes.len() && ui.small_button("▼").clicked() {
+                            swap = Some((s.id, scenes[i + 1].id));
+                        }
+                    });
+                }
+                ui.add_space(8.0);
+                egui::CollapsingHeader::new("Lire l'épisode (scénario complet)")
+                    .id_salt("episode_read")
+                    .show(ui, |ui| match script::episode_text(&self.conn, episode) {
+                        Ok(text) if text.trim().is_empty() => {
+                            ui.label("Rien d'écrit pour l'instant.");
+                        }
+                        Ok(text) => {
+                            ui.monospace(text);
+                        }
+                        Err(e) => {
+                            ui.label(e.to_string());
+                        }
+                    });
             });
-        });
         if let Some((a, b)) = swap {
             self.apply(|c| script::swap_scenes(c, a, b));
         }
@@ -130,7 +132,9 @@ impl StudioApp {
 
     fn scene_script(&mut self, ui: &mut egui::Ui, scene: i64) {
         let blocks = script::list(&self.conn, scene).unwrap_or_default();
-        self.script.bufs.retain(|k, _| blocks.iter().any(|b| b.id == *k));
+        self.script
+            .bufs
+            .retain(|k, _| blocks.iter().any(|b| b.id == *k));
         if self.script.structure.map(|s| s.0) != Some(scene) {
             let (a, q) = script::structure(&self.conn, scene).unwrap_or((None, None));
             self.script.structure = Some((scene, a.unwrap_or(0), q.unwrap_or(0)));
@@ -207,7 +211,8 @@ impl StudioApp {
             .iter()
             .filter_map(|b| {
                 let buf = self.script.bufs.get(&b.id)?;
-                let changed = buf.ty != b.block_type || buf.character != b.character_id || buf.text != b.text;
+                let changed =
+                    buf.ty != b.block_type || buf.character != b.character_id || buf.text != b.text;
                 changed.then(|| (b.id, buf.ty, buf.character, buf.text.clone()))
             })
             .collect();
@@ -218,20 +223,36 @@ impl StudioApp {
                     add = Some(t);
                 }
             }
-            if ui.add_enabled(!dirty.is_empty(), egui::Button::new("Enregistrer le scénario")).clicked() {
+            if ui
+                .add_enabled(
+                    !dirty.is_empty(),
+                    egui::Button::new("Enregistrer le scénario"),
+                )
+                .clicked()
+            {
                 save = true;
             }
             if !dirty.is_empty() {
                 ui.label(
-                    RichText::new(format!("{} bloc(s) modifié(s), non enregistré(s)", dirty.len()))
-                        .color(Color32::from_rgb(255, 180, 80)),
+                    RichText::new(format!(
+                        "{} bloc(s) modifié(s), non enregistré(s)",
+                        dirty.len()
+                    ))
+                    .color(Color32::from_rgb(255, 180, 80)),
                 );
             }
         });
 
         if apply_structure {
             if let Some((_, act, seq)) = self.script.structure {
-                self.apply(|c| script::set_structure(c, scene, (act > 0).then_some(act), (seq > 0).then_some(seq)));
+                self.apply(|c| {
+                    script::set_structure(
+                        c,
+                        scene,
+                        (act > 0).then_some(act),
+                        (seq > 0).then_some(seq),
+                    )
+                });
             }
         }
         if let Some((id, up)) = mv {

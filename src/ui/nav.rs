@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use eframe::egui::{self, Color32, RichText};
 
-use super::{StudioApp, View};
+use super::{theme, StudioApp, View};
 use crate::db::{
     nodes::{self, NodeKind},
     timeline,
@@ -74,37 +74,47 @@ impl StudioApp {
     }
 
     pub(super) fn has_sub_nav(&self) -> bool {
-        matches!(section_of(self.view), Section::Characters | Section::Writing)
+        matches!(
+            section_of(self.view),
+            Section::Characters | Section::Writing
+        )
     }
 
     pub(super) fn top_bar(&mut self, ctx: &egui::Context) {
         let current = section_of(self.view);
         let mut go: Option<Section> = None;
-        egui::TopBottomPanel::top("top_nav").show(ctx, |ui| {
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Sitcom Studio").strong().size(17.0));
-                ui.add_space(18.0);
-                for (s, label) in SECTIONS {
-                    let text = RichText::new(label).size(15.0);
-                    if ui.selectable_label(current == s, text).clicked() {
-                        go = Some(s);
-                    }
-                    ui.add_space(4.0);
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let r = ui.add(
-                        egui::TextEdit::singleline(&mut self.search)
-                            .hint_text("Recherche globale…")
-                            .desired_width(220.0),
+        egui::TopBottomPanel::top("top_nav")
+            .frame(theme::bar_frame(ctx, egui::Margin::symmetric(16, 8)))
+            .show(ctx, |ui| {
+                ui.add_space(2.0);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("Sitcom Studio")
+                            .strong()
+                            .size(18.0)
+                            .color(theme::ACCENT),
                     );
-                    if r.changed() {
-                        self.refresh_search();
+                    ui.add_space(18.0);
+                    for (s, label) in SECTIONS {
+                        let text = RichText::new(label).size(15.0);
+                        if ui.selectable_label(current == s, text).clicked() {
+                            go = Some(s);
+                        }
+                        ui.add_space(4.0);
                     }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let r = ui.add(
+                            egui::TextEdit::singleline(&mut self.search)
+                                .hint_text("Recherche globale…")
+                                .desired_width(220.0),
+                        );
+                        if r.changed() {
+                            self.refresh_search();
+                        }
+                    });
                 });
+                ui.add_space(2.0);
             });
-            ui.add_space(6.0);
-        });
         if let Some(s) = go {
             let v = self.section_view[section_index(s)];
             self.search.clear();
@@ -130,11 +140,18 @@ impl StudioApp {
         let entries: [(&str, View, Option<bool>); 3] = [
             ("Personnages", View::Kind(NodeKind::Character), Some(false)),
             ("Relations", View::Relations, None),
-            ("Personnages secondaires", View::Kind(NodeKind::Character), Some(true)),
+            (
+                "Personnages secondaires",
+                View::Kind(NodeKind::Character),
+                Some(true),
+            ),
         ];
         for (label, view, secondary) in entries {
             let active = self.view == view && secondary.map_or(true, |s| s == self.char_secondary);
-            if ui.selectable_label(active, RichText::new(label).size(15.0)).clicked() {
+            if ui
+                .selectable_label(active, RichText::new(label).size(15.0))
+                .clicked()
+            {
                 self.selected = None;
                 self.edit = None;
                 if let Some(s) = secondary {
@@ -151,27 +168,41 @@ impl StudioApp {
         let air = timeline::list_air(&self.conn).unwrap_or_default();
         let mut seasons: BTreeMap<i64, Vec<(i64, i64, String)>> = BTreeMap::new();
         for r in air {
-            seasons.entry(r.season).or_default().push((r.number, r.id, r.title));
+            seasons
+                .entry(r.season)
+                .or_default()
+                .push((r.number, r.id, r.title));
         }
         for eps in seasons.values_mut() {
             eps.sort();
         }
         let selected = self.selected;
         let (mut open_ep, mut new_ep, mut new_season, mut plots) = (None, None, false, false);
-        ui.label(RichText::new("SAISONS").small().color(Color32::from_gray(140)));
-        egui::ScrollArea::vertical().id_salt("writing_nav").show(ui, |ui| {
-            if seasons.is_empty() {
-                ui.label("Aucune saison.");
-            }
-            for (season, eps) in &seasons {
-                let has_selected = eps.iter().any(|(_, id, _)| Some(*id) == selected);
-                egui::CollapsingHeader::new(RichText::new(format!("Saison {season}")).size(15.0))
+        ui.label(
+            RichText::new("SAISONS")
+                .small()
+                .color(Color32::from_gray(140)),
+        );
+        egui::ScrollArea::vertical()
+            .id_salt("writing_nav")
+            .show(ui, |ui| {
+                if seasons.is_empty() {
+                    ui.label("Aucune saison.");
+                }
+                for (season, eps) in &seasons {
+                    let has_selected = eps.iter().any(|(_, id, _)| Some(*id) == selected);
+                    egui::CollapsingHeader::new(
+                        RichText::new(format!("Saison {season}")).size(15.0),
+                    )
                     .id_salt(("season", *season))
                     .default_open(has_selected)
                     .show(ui, |ui| {
                         for (number, id, title) in eps {
                             if ui
-                                .selectable_label(selected == Some(*id), format!("E{number} · {title}"))
+                                .selectable_label(
+                                    selected == Some(*id),
+                                    format!("E{number} · {title}"),
+                                )
                                 .clicked()
                             {
                                 open_ep = Some(*id);
@@ -181,17 +212,20 @@ impl StudioApp {
                             new_ep = Some(*season);
                         }
                     });
-            }
-            ui.add_space(6.0);
-            if ui.button("+ Nouvelle saison").clicked() {
-                new_season = true;
-            }
-            ui.separator();
-            let active = self.view == View::Kind(NodeKind::Plot);
-            if ui.selectable_label(active, RichText::new("Intrigues et arcs").size(15.0)).clicked() {
-                plots = true;
-            }
-        });
+                }
+                ui.add_space(6.0);
+                if ui.button("+ Nouvelle saison").clicked() {
+                    new_season = true;
+                }
+                ui.separator();
+                let active = self.view == View::Kind(NodeKind::Plot);
+                if ui
+                    .selectable_label(active, RichText::new("Intrigues et arcs").size(15.0))
+                    .clicked()
+                {
+                    plots = true;
+                }
+            });
 
         let last_season = seasons.keys().next_back().copied().unwrap_or(0);
         let create = if let Some(s) = new_ep {
@@ -248,7 +282,10 @@ impl StudioApp {
         let mut go = None;
         ui.horizontal(|ui| {
             for (label, v) in &tabs {
-                if ui.selectable_label(self.view == *v, RichText::new(*label).size(14.0)).clicked() {
+                if ui
+                    .selectable_label(self.view == *v, RichText::new(*label).size(14.0))
+                    .clicked()
+                {
                     go = Some(*v);
                 }
             }

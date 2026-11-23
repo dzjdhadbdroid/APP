@@ -50,7 +50,9 @@ impl std::ops::Deref for Atomic<'_> {
 impl Drop for Atomic<'_> {
     fn drop(&mut self) {
         if !self.done {
-            let _ = self.conn.execute_batch("ROLLBACK TO atomic_op; RELEASE atomic_op");
+            let _ = self
+                .conn
+                .execute_batch("ROLLBACK TO atomic_op; RELEASE atomic_op");
         }
     }
 }
@@ -58,7 +60,10 @@ impl Drop for Atomic<'_> {
 /// Migrations ordonnées. La version appliquée est stockée dans `PRAGMA user_version`.
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("../../migrations/0001_core.sql")),
-    (2, include_str!("../../migrations/0002_character_fields.sql")),
+    (
+        2,
+        include_str!("../../migrations/0002_character_fields.sql"),
+    ),
     (3, include_str!("../../migrations/0003_history_search.sql")),
     (4, include_str!("../../migrations/0004_settings.sql")),
     (5, include_str!("../../migrations/0005_script.sql")),
@@ -111,8 +116,14 @@ pub(crate) fn unix_secs() -> u64 {
 }
 
 /// Sauvegarde horodatée `<prefixe>_<secondes>.sqlite` dans `<dir>/backups/`.
-pub fn backup_with_prefix(conn: &Connection, dir: &Path, prefix: &str) -> DbResult<std::path::PathBuf> {
-    let path = dir.join("backups").join(format!("{prefix}_{:012}.sqlite", unix_secs()));
+pub fn backup_with_prefix(
+    conn: &Connection,
+    dir: &Path,
+    prefix: &str,
+) -> DbResult<std::path::PathBuf> {
+    let path = dir
+        .join("backups")
+        .join(format!("{prefix}_{:012}.sqlite", unix_secs()));
     backup(conn, &path)?;
     Ok(path)
 }
@@ -138,7 +149,9 @@ pub fn restore(conn: &mut Connection, from: &Path) -> DbResult<()> {
     {
         let src = Connection::open_with_flags(from, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         src.query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get::<_, i64>(0))
-            .map_err(|_| DbError::Invalid("ce fichier n'est pas une sauvegarde Sitcom Studio".into()))?;
+            .map_err(|_| {
+                DbError::Invalid("ce fichier n'est pas une sauvegarde Sitcom Studio".into())
+            })?;
         let b = rusqlite::backup::Backup::new(&src, &mut *conn)?;
         b.run_to_completion(64, std::time::Duration::from_millis(0), None)?;
     }
@@ -179,7 +192,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("backups")).unwrap();
         for i in 1..=5u64 {
-            std::fs::write(dir.join("backups").join(format!("auto_{i:012}.sqlite")), b"x").unwrap();
+            std::fs::write(
+                dir.join("backups").join(format!("auto_{i:012}.sqlite")),
+                b"x",
+            )
+            .unwrap();
         }
         auto_backup(&conn, &dir, 3).unwrap();
         let n = std::fs::read_dir(dir.join("backups")).unwrap().count();
@@ -197,7 +214,11 @@ mod tests {
         nodes::create(&conn, nodes::NodeKind::Character, "Bob").unwrap();
         assert_eq!(nodes::all(&conn).unwrap().len(), 2);
         restore(&mut conn, &saved).unwrap();
-        let titles: Vec<_> = nodes::all(&conn).unwrap().into_iter().map(|n| n.title).collect();
+        let titles: Vec<_> = nodes::all(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|n| n.title)
+            .collect();
         assert_eq!(titles, ["Alice"]);
         let junk = dir.join("junk.sqlite");
         std::fs::write(&junk, b"pas une base").unwrap();
@@ -210,11 +231,14 @@ mod tests {
     fn backup_produces_a_readable_copy() {
         let conn = open_in_memory().unwrap();
         nodes::create(&conn, nodes::NodeKind::Character, "Alice").unwrap();
-        let path = std::env::temp_dir().join(format!("sitcom_backup_{}.sqlite", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("sitcom_backup_{}.sqlite", std::process::id()));
         let _ = std::fs::remove_file(&path);
         backup(&conn, &path).unwrap();
         let copy = Connection::open(&path).unwrap();
-        let n: i64 = copy.query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0)).unwrap();
+        let n: i64 = copy
+            .query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 1);
         drop(copy);
         let _ = std::fs::remove_file(&path);
@@ -236,14 +260,22 @@ mod tests {
         conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
         conn.execute_batch(MIGRATIONS[0].1).unwrap();
         conn.pragma_update(None, "user_version", 1).unwrap();
-        conn.execute("INSERT INTO nodes (kind, title) VALUES ('character', 'Alice')", []).unwrap();
-        conn.execute("INSERT INTO characters (id) VALUES (1)", []).unwrap();
+        conn.execute(
+            "INSERT INTO nodes (kind, title) VALUES ('character', 'Alice')",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO characters (id) VALUES (1)", [])
+            .unwrap();
         migrate(&mut conn).unwrap();
         let (v, n): (i64, i64) = (
-            conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap(),
-            conn.query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0)).unwrap(),
+            conn.pragma_query_value(None, "user_version", |r| r.get(0))
+                .unwrap(),
+            conn.query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0))
+                .unwrap(),
         );
         assert_eq!((v, n), (6, 1));
-        conn.execute("UPDATE characters SET evolution = 'x' WHERE id = 1", []).unwrap(); // colonne ajoutée
+        conn.execute("UPDATE characters SET evolution = 'x' WHERE id = 1", [])
+            .unwrap(); // colonne ajoutée
     }
 }

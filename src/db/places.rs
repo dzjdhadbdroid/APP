@@ -6,7 +6,9 @@ use super::{Atomic, DbError, DbResult};
 
 pub fn parent_of(conn: &Connection, place: i64) -> DbResult<Option<i64>> {
     let p: Option<Option<i64>> = conn
-        .query_row("SELECT parent_id FROM places WHERE id = ?1", [place], |r| r.get(0))
+        .query_row("SELECT parent_id FROM places WHERE id = ?1", [place], |r| {
+            r.get(0)
+        })
         .optional()?;
     Ok(p.flatten())
 }
@@ -39,10 +41,14 @@ pub fn set_parent(conn: &Connection, place: i64, parent: Option<i64>) -> DbResul
     if let Some(p) = parent {
         if is_self_or_descendant(conn, place, p)? {
             return Err(DbError::Invalid(
-                "un lieu ne peut pas être placé dans lui-même ni dans l'un de ses sous-lieux".into(),
+                "un lieu ne peut pas être placé dans lui-même ni dans l'un de ses sous-lieux"
+                    .into(),
             ));
         }
-        let exists: i64 = conn.query_row("SELECT COUNT(*) FROM places WHERE id = ?1", [p], |r| r.get(0))?;
+        let exists: i64 =
+            conn.query_row("SELECT COUNT(*) FROM places WHERE id = ?1", [p], |r| {
+                r.get(0)
+            })?;
         if exists == 0 {
             return Err(DbError::NotFound(p));
         }
@@ -54,7 +60,10 @@ pub fn set_parent(conn: &Connection, place: i64, parent: Option<i64>) -> DbResul
             params![old, place],
         )?;
     }
-    let n = tx.execute("UPDATE places SET parent_id = ?2 WHERE id = ?1", params![place, parent])?;
+    let n = tx.execute(
+        "UPDATE places SET parent_id = ?2 WHERE id = ?1",
+        params![place, parent],
+    )?;
     if n == 0 {
         return Err(DbError::NotFound(place));
     }
@@ -64,7 +73,10 @@ pub fn set_parent(conn: &Connection, place: i64, parent: Option<i64>) -> DbResul
             params![p, place],
         )?;
     }
-    tx.execute("UPDATE nodes SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1", [place])?;
+    tx.execute(
+        "UPDATE nodes SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1",
+        [place],
+    )?;
     tx.commit()?;
     Ok(())
 }
@@ -82,7 +94,10 @@ mod tests {
         let pantry = nodes::create(&conn, NodeKind::Place, "Garde-manger").unwrap();
         set_parent(&conn, kitchen, Some(house)).unwrap();
         set_parent(&conn, pantry, Some(kitchen)).unwrap();
-        assert_eq!(children(&conn, house).unwrap(), vec![(kitchen, "Cuisine".to_string())]);
+        assert_eq!(
+            children(&conn, house).unwrap(),
+            vec![(kitchen, "Cuisine".to_string())]
+        );
         assert_eq!(links::for_node(&conn, house).unwrap().len(), 1);
         assert!(set_parent(&conn, house, Some(pantry)).is_err()); // cycle
         assert!(set_parent(&conn, house, Some(house)).is_err());

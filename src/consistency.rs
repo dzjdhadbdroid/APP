@@ -71,16 +71,23 @@ pub struct Finding {
 }
 
 /// Éléments reliés à `id` par un lien de ce type, quel que soit le sens.
-fn neighbors<'a>(links: &'a [LinkFact], id: i64, link_type: &'a str) -> impl Iterator<Item = i64> + 'a {
-    links.iter().filter(move |l| l.link_type == link_type).filter_map(move |l| {
-        if l.src == id {
-            Some(l.dst)
-        } else if l.dst == id {
-            Some(l.src)
-        } else {
-            None
-        }
-    })
+fn neighbors<'a>(
+    links: &'a [LinkFact],
+    id: i64,
+    link_type: &'a str,
+) -> impl Iterator<Item = i64> + 'a {
+    links
+        .iter()
+        .filter(move |l| l.link_type == link_type)
+        .filter_map(move |l| {
+            if l.src == id {
+                Some(l.dst)
+            } else if l.dst == id {
+                Some(l.src)
+            } else {
+                None
+            }
+        })
 }
 
 pub fn analyze(f: &Facts) -> Vec<Finding> {
@@ -99,7 +106,10 @@ pub fn analyze(f: &Facts) -> Vec<Finding> {
     let mut pairs: BTreeMap<(i64, i64), Vec<String>> = BTreeMap::new();
     for l in f.links.iter().filter(|l| l.link_type == "relation") {
         if let Some(label) = l.label.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-            pairs.entry((l.src.min(l.dst), l.src.max(l.dst))).or_default().push(label.to_lowercase());
+            pairs
+                .entry((l.src.min(l.dst), l.src.max(l.dst)))
+                .or_default()
+                .push(label.to_lowercase());
         }
     }
     for ((a, b), mut labels) in pairs {
@@ -122,15 +132,29 @@ pub fn analyze(f: &Facts) -> Vec<Finding> {
     out
 }
 
-fn knowledge_rule(f: &Facts, title: &dyn Fn(i64) -> String, is: &dyn Fn(i64, &str) -> bool, out: &mut Vec<Finding>) {
-    for req in f.links.iter().filter(|l| l.link_type == "requires" && f.event_dates.contains_key(&l.src)) {
+fn knowledge_rule(
+    f: &Facts,
+    title: &dyn Fn(i64) -> String,
+    is: &dyn Fn(i64, &str) -> bool,
+    out: &mut Vec<Finding>,
+) {
+    for req in f
+        .links
+        .iter()
+        .filter(|l| l.link_type == "requires" && f.event_dates.contains_key(&l.src))
+    {
         let (event, subject) = (req.src, req.dst);
         let when = f.event_dates[&event];
-        let mut people: Vec<i64> = neighbors(f.links, event, "involves").filter(|id| is(*id, "character")).collect();
+        let mut people: Vec<i64> = neighbors(f.links, event, "involves")
+            .filter(|id| is(*id, "character"))
+            .collect();
         people.sort_unstable();
         people.dedup();
         for c in people {
-            let known = f.knowledge.iter().find(|k| k.character == c && k.subject == subject);
+            let known = f
+                .knowledge
+                .iter()
+                .find(|k| k.character == c && k.subject == subject);
             match known {
                 None => out.push(Finding {
                     code: "KNOWLEDGE_MISSING",
@@ -144,7 +168,9 @@ fn knowledge_rule(f: &Facts, title: &dyn Fn(i64) -> String, is: &dyn Fn(i64, &st
                     ),
                 }),
                 Some(k) => {
-                    let Some(learned_at) = k.learned_event else { continue };
+                    let Some(learned_at) = k.learned_event else {
+                        continue;
+                    };
                     let learned = f.event_dates.get(&learned_at).copied().flatten();
                     match (learned, when) {
                         (Some(l), Some(w)) if l > w => out.push(Finding {
@@ -180,7 +206,9 @@ fn knowledge_rule(f: &Facts, title: &dyn Fn(i64) -> String, is: &dyn Fn(i64, &st
 
 fn mention_rule(f: &Facts, title: &dyn Fn(i64) -> String, out: &mut Vec<Finding>) {
     for l in f.links.iter().filter(|l| l.link_type == "mentions") {
-        let (Some(Some(from)), Some(Some(to))) = (f.event_dates.get(&l.src), f.event_dates.get(&l.dst)) else {
+        let (Some(Some(from)), Some(Some(to))) =
+            (f.event_dates.get(&l.src), f.event_dates.get(&l.dst))
+        else {
             continue; // seuls des événements datés sont comparables
         };
         if from < to {
@@ -198,7 +226,12 @@ fn mention_rule(f: &Facts, title: &dyn Fn(i64) -> String, out: &mut Vec<Finding>
     }
 }
 
-fn forbidden_place_rule(f: &Facts, title: &dyn Fn(i64) -> String, is: &dyn Fn(i64, &str) -> bool, out: &mut Vec<Finding>) {
+fn forbidden_place_rule(
+    f: &Facts,
+    title: &dyn Fn(i64) -> String,
+    is: &dyn Fn(i64, &str) -> bool,
+    out: &mut Vec<Finding>,
+) {
     for scene in f.nodes.iter().filter(|n| n.kind == "scene") {
         // Le lieu de la scène et tous ses lieux parents (un appartement est dans un immeuble).
         let mut places: Vec<i64> = Vec::new();
@@ -215,7 +248,9 @@ fn forbidden_place_rule(f: &Facts, title: &dyn Fn(i64) -> String, is: &dyn Fn(i6
         if places.is_empty() {
             continue;
         }
-        let mut people: Vec<i64> = neighbors(f.links, scene.id, "involves").filter(|id| is(*id, "character")).collect();
+        let mut people: Vec<i64> = neighbors(f.links, scene.id, "involves")
+            .filter(|id| is(*id, "character"))
+            .collect();
         people.sort_unstable();
         people.dedup();
         for c in people {
@@ -239,9 +274,16 @@ fn forbidden_place_rule(f: &Facts, title: &dyn Fn(i64) -> String, is: &dyn Fn(i6
     }
 }
 
-fn object_gap_rule(f: &Facts, title: &dyn Fn(i64) -> String, is: &dyn Fn(i64, &str) -> bool, out: &mut Vec<Finding>) {
+fn object_gap_rule(
+    f: &Facts,
+    title: &dyn Fn(i64) -> String,
+    is: &dyn Fn(i64, &str) -> bool,
+    out: &mut Vec<Finding>,
+) {
     for obj in f.nodes.iter().filter(|n| n.kind == "object") {
-        let appears: HashSet<i64> = neighbors(f.links, obj.id, "appears_in").filter(|e| is(*e, "episode")).collect();
+        let appears: HashSet<i64> = neighbors(f.links, obj.id, "appears_in")
+            .filter(|e| is(*e, "episode"))
+            .collect();
         if appears.len() < 2 {
             continue;
         }
@@ -267,9 +309,15 @@ fn object_gap_rule(f: &Facts, title: &dyn Fn(i64) -> String, is: &dyn Fn(i64, &s
                 .collect();
             episodes.sort_unstable();
             episodes.dedup();
-            let present: Vec<usize> =
-                episodes.iter().enumerate().filter(|(_, (_, e))| appears.contains(e)).map(|(i, _)| i).collect();
-            let (Some(&first), Some(&last)) = (present.first(), present.last()) else { continue };
+            let present: Vec<usize> = episodes
+                .iter()
+                .enumerate()
+                .filter(|(_, (_, e))| appears.contains(e))
+                .map(|(i, _)| i)
+                .collect();
+            let (Some(&first), Some(&last)) = (present.first(), present.last()) else {
+                continue;
+            };
             for (i, (_, e)) in episodes.iter().enumerate() {
                 if i > first && i < last && !appears.contains(e) {
                     out.push(Finding {
@@ -294,10 +342,19 @@ mod tests {
     use super::*;
 
     fn node(id: i64, title: &str, kind: &str) -> NodeFact {
-        NodeFact { id, title: title.into(), kind: kind.into() }
+        NodeFact {
+            id,
+            title: title.into(),
+            kind: kind.into(),
+        }
     }
     fn link(src: i64, dst: i64, t: &str, label: Option<&str>) -> LinkFact {
-        LinkFact { src, dst, link_type: t.into(), label: label.map(Into::into) }
+        LinkFact {
+            src,
+            dst,
+            link_type: t.into(),
+            label: label.map(Into::into),
+        }
     }
     fn run(
         nodes: &[NodeFact],
@@ -322,17 +379,36 @@ mod tests {
 
     // 1 Alice, 2 secret, 10 événement (nécessite le secret), 11 événement où Alice l'apprend
     fn knowledge_world(learned_date: Option<i64>, event_date: Option<i64>) -> Vec<Finding> {
-        let nodes = [node(1, "Alice", "character"), node(2, "Le secret", "plot"), node(10, "Dîner", "event"), node(11, "Révélation", "event")];
+        let nodes = [
+            node(1, "Alice", "character"),
+            node(2, "Le secret", "plot"),
+            node(10, "Dîner", "event"),
+            node(11, "Révélation", "event"),
+        ];
         let links = [link(10, 2, "requires", None), link(10, 1, "involves", None)];
-        let know = [KnowledgeFact { character: 1, subject: 2, learned_event: Some(11) }];
-        run(&nodes, &[(10, event_date), (11, learned_date)], &[], &[], &links, &know)
+        let know = [KnowledgeFact {
+            character: 1,
+            subject: 2,
+            learned_event: Some(11),
+        }];
+        run(
+            &nodes,
+            &[(10, event_date), (11, learned_date)],
+            &[],
+            &[],
+            &links,
+            &know,
+        )
     }
 
     #[test]
     fn learning_after_the_event_is_an_error() {
         let f = knowledge_world(Some(200), Some(100));
         assert_eq!(f.len(), 1);
-        assert_eq!((f[0].code, f[0].severity, f[0].node_id), ("KNOWLEDGE_TOO_LATE", Severity::Error, 10));
+        assert_eq!(
+            (f[0].code, f[0].severity, f[0].node_id),
+            ("KNOWLEDGE_TOO_LATE", Severity::Error, 10)
+        );
     }
 
     #[test]
@@ -349,7 +425,11 @@ mod tests {
 
     #[test]
     fn never_learning_is_a_warning() {
-        let nodes = [node(1, "Alice", "character"), node(2, "Le secret", "plot"), node(10, "Dîner", "event")];
+        let nodes = [
+            node(1, "Alice", "character"),
+            node(2, "Le secret", "plot"),
+            node(10, "Dîner", "event"),
+        ];
         let links = [link(10, 2, "requires", None), link(1, 10, "involves", None)]; // sens inverse accepté
         let f = run(&nodes, &[(10, Some(100))], &[], &[], &links, &[]);
         assert_eq!((f.len(), f[0].code), (1, "KNOWLEDGE_MISSING"));
@@ -358,7 +438,10 @@ mod tests {
     #[test]
     fn contradictory_relations_are_flagged_once() {
         let nodes = [node(1, "Alice", "character"), node(2, "Bob", "character")];
-        let links = [link(1, 2, "relation", Some("frère")), link(2, 1, "relation", Some("Ennemi"))];
+        let links = [
+            link(1, 2, "relation", Some("frère")),
+            link(2, 1, "relation", Some("Ennemi")),
+        ];
         let f = run(&nodes, &[], &[], &[], &links, &[]);
         assert_eq!((f.len(), f[0].code), (1, "RELATION_CONTRADICTION"));
     }
@@ -366,7 +449,10 @@ mod tests {
     #[test]
     fn same_label_both_ways_is_not_a_contradiction() {
         let nodes = [node(1, "A", "character"), node(2, "B", "character")];
-        let links = [link(1, 2, "relation", Some("amis")), link(2, 1, "relation", Some("Amis"))];
+        let links = [
+            link(1, 2, "relation", Some("amis")),
+            link(2, 1, "relation", Some("Amis")),
+        ];
         assert!(run(&nodes, &[], &[], &[], &links, &[]).is_empty());
     }
 
@@ -374,10 +460,36 @@ mod tests {
     fn mentioning_an_event_before_it_happens_is_flagged() {
         let nodes = [node(10, "Mariage", "event"), node(11, "Toast", "event")];
         let links = [link(11, 10, "mentions", None)];
-        let f = run(&nodes, &[(10, Some(200)), (11, Some(100))], &[], &[], &links, &[]);
-        assert_eq!((f.len(), f[0].code, f[0].node_id), (1, "EVENT_MENTIONED_BEFORE", 11));
-        assert!(run(&nodes, &[(10, Some(100)), (11, Some(200))], &[], &[], &links, &[]).is_empty()); // après : normal
-        assert!(run(&nodes, &[(10, None), (11, Some(100))], &[], &[], &links, &[]).is_empty()); // non daté : ignoré
+        let f = run(
+            &nodes,
+            &[(10, Some(200)), (11, Some(100))],
+            &[],
+            &[],
+            &links,
+            &[],
+        );
+        assert_eq!(
+            (f.len(), f[0].code, f[0].node_id),
+            (1, "EVENT_MENTIONED_BEFORE", 11)
+        );
+        assert!(run(
+            &nodes,
+            &[(10, Some(100)), (11, Some(200))],
+            &[],
+            &[],
+            &links,
+            &[]
+        )
+        .is_empty()); // après : normal
+        assert!(run(
+            &nodes,
+            &[(10, None), (11, Some(100))],
+            &[],
+            &[],
+            &links,
+            &[]
+        )
+        .is_empty()); // non daté : ignoré
     }
 
     // 1 Alice · 20 scène · 30 appartement ∈ 31 immeuble · 32 jardin
@@ -389,14 +501,21 @@ mod tests {
             node(31, "Immeuble", "place"),
             node(32, "Jardin", "place"),
         ];
-        let links = [link(20, set_in, "set_in", None), link(20, 1, "involves", None), link(1, not_at, "not_at", None)];
+        let links = [
+            link(20, set_in, "set_in", None),
+            link(20, 1, "involves", None),
+            link(1, not_at, "not_at", None),
+        ];
         run(&nodes, &[], &[], &[(30, 31)], &links, &[])
     }
 
     #[test]
     fn character_in_a_forbidden_place_is_an_error() {
         let f = place_world(30, 30);
-        assert_eq!((f.len(), f[0].code, f[0].severity), (1, "FORBIDDEN_PLACE", Severity::Error));
+        assert_eq!(
+            (f.len(), f[0].code, f[0].severity),
+            (1, "FORBIDDEN_PLACE", Severity::Error)
+        );
     }
 
     #[test]
@@ -408,7 +527,12 @@ mod tests {
 
     #[test]
     fn a_cycle_in_place_parents_does_not_hang() {
-        let nodes = [node(1, "A", "character"), node(20, "S", "scene"), node(30, "P", "place"), node(31, "Q", "place")];
+        let nodes = [
+            node(1, "A", "character"),
+            node(20, "S", "scene"),
+            node(30, "P", "place"),
+            node(31, "Q", "place"),
+        ];
         let links = [link(20, 30, "set_in", None), link(20, 1, "involves", None)];
         assert!(run(&nodes, &[], &[], &[(30, 31), (31, 30)], &links, &[]).is_empty());
     }
@@ -435,7 +559,10 @@ mod tests {
     #[test]
     fn an_object_missing_between_two_appearances_is_noted() {
         let f = object_world(&[10, 12]);
-        assert_eq!((f.len(), f[0].code, f[0].severity), (1, "OBJECT_GAP", Severity::Info));
+        assert_eq!(
+            (f.len(), f[0].code, f[0].severity),
+            (1, "OBJECT_GAP", Severity::Info)
+        );
         assert!(f[0].message.contains("Ép. 2"));
     }
 

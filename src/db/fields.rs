@@ -23,13 +23,25 @@ pub struct FieldDef {
 }
 
 const fn line(column: &'static str, label: &'static str) -> FieldDef {
-    FieldDef { column, label, kind: FieldKind::Line }
+    FieldDef {
+        column,
+        label,
+        kind: FieldKind::Line,
+    }
 }
 const fn text(column: &'static str, label: &'static str) -> FieldDef {
-    FieldDef { column, label, kind: FieldKind::Text }
+    FieldDef {
+        column,
+        label,
+        kind: FieldKind::Text,
+    }
 }
 const fn choice(column: &'static str, label: &'static str, o: Options) -> FieldDef {
-    FieldDef { column, label, kind: FieldKind::Choice(o) }
+    FieldDef {
+        column,
+        label,
+        kind: FieldKind::Choice(o),
+    }
 }
 
 const PLOT_TYPES: Options = &[
@@ -124,10 +136,19 @@ pub fn load(conn: &Connection, kind: NodeKind, id: i64) -> DbResult<Vec<String>>
     if d.is_empty() {
         return Ok(Vec::new());
     }
-    let cols: Vec<String> = d.iter().map(|f| format!("COALESCE({}, '')", f.column)).collect();
-    let sql = format!("SELECT {} FROM {} WHERE id = ?1", cols.join(", "), kind.detail_table());
+    let cols: Vec<String> = d
+        .iter()
+        .map(|f| format!("COALESCE({}, '')", f.column))
+        .collect();
+    let sql = format!(
+        "SELECT {} FROM {} WHERE id = ?1",
+        cols.join(", "),
+        kind.detail_table()
+    );
     conn.query_row(&sql, [id], |r| {
-        (0..d.len()).map(|i| r.get::<_, String>(i)).collect::<Result<Vec<_>, _>>()
+        (0..d.len())
+            .map(|i| r.get::<_, String>(i))
+            .collect::<Result<Vec<_>, _>>()
     })
     .map_err(|e| match e {
         rusqlite::Error::QueryReturnedNoRows => DbError::NotFound(id),
@@ -151,7 +172,11 @@ pub fn save(conn: &Connection, kind: NodeKind, id: i64, values: &[String]) -> Db
             }
         }
     }
-    let sets: Vec<String> = d.iter().enumerate().map(|(i, f)| format!("{} = ?{}", f.column, i + 1)).collect();
+    let sets: Vec<String> = d
+        .iter()
+        .enumerate()
+        .map(|(i, f)| format!("{} = ?{}", f.column, i + 1))
+        .collect();
     let sql = format!(
         "UPDATE {} SET {} WHERE id = ?{}",
         kind.detail_table(),
@@ -191,7 +216,10 @@ pub fn rebuild_body(conn: &Connection, kind: NodeKind, id: i64) -> DbResult<()> 
             parts.push(row?);
         }
     }
-    conn.execute("UPDATE nodes SET body = ?2 WHERE id = ?1", rusqlite::params![id, parts.join("\n")])?;
+    conn.execute(
+        "UPDATE nodes SET body = ?2 WHERE id = ?1",
+        rusqlite::params![id, parts.join("\n")],
+    )?;
     Ok(())
 }
 
@@ -203,7 +231,12 @@ mod tests {
     #[test]
     fn every_kind_roundtrips_its_fields() {
         let conn = open_in_memory().unwrap();
-        for kind in [NodeKind::Character, NodeKind::Place, NodeKind::Plot, NodeKind::Object] {
+        for kind in [
+            NodeKind::Character,
+            NodeKind::Place,
+            NodeKind::Plot,
+            NodeKind::Object,
+        ] {
             let id = nodes::create(&conn, kind, "x").unwrap();
             let defaults = load(&conn, kind, id).unwrap();
             assert_eq!(defaults.len(), defs(kind).len());
@@ -228,7 +261,10 @@ mod tests {
         v[0] = "drafting".into();
         save(&conn, NodeKind::Episode, ep, &v).unwrap();
         save(&conn, NodeKind::Scene, sc, &["ALICE : Salut !".to_string()]).unwrap();
-        assert_eq!(load(&conn, NodeKind::Scene, sc).unwrap()[0], "ALICE : Salut !");
+        assert_eq!(
+            load(&conn, NodeKind::Scene, sc).unwrap()[0],
+            "ALICE : Salut !"
+        );
     }
 
     #[test]
@@ -236,7 +272,13 @@ mod tests {
         let conn = open_in_memory().unwrap();
         let ep = nodes::create_episode(&conn, "Pilote", 1, 1).unwrap();
         let sc = nodes::create_scene(&conn, ep, "s", 1).unwrap();
-        save(&conn, NodeKind::Scene, sc, &["ALICE : Quelle surprise !".to_string()]).unwrap();
+        save(
+            &conn,
+            NodeKind::Scene,
+            sc,
+            &["ALICE : Quelle surprise !".to_string()],
+        )
+        .unwrap();
         assert_eq!(nodes::search_text(&conn, "surprise").unwrap().len(), 1);
     }
 

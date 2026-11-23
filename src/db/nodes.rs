@@ -109,7 +109,10 @@ fn from_row(row: &Row) -> rusqlite::Result<Node> {
             rusqlite::Error::FromSqlConversionFailure(
                 0,
                 rusqlite::types::Type::Text,
-                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())),
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    e.to_string(),
+                )),
             )
         })?,
         title: row.get("title")?,
@@ -317,7 +320,9 @@ pub fn list_by_kind(conn: &Connection, kind: NodeKind) -> DbResult<Vec<Node>> {
 
 /// Éléments sans aucune connexion.
 pub fn isolated(conn: &Connection) -> DbResult<Vec<Node>> {
-    let mut stmt = conn.prepare(&format!("SELECT {COLS} FROM v_isolated_nodes ORDER BY title"))?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLS} FROM v_isolated_nodes ORDER BY title"
+    ))?;
     let rows = stmt.query_map([], from_row)?;
     Ok(rows.collect::<Result<_, _>>()?)
 }

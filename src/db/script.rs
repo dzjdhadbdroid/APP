@@ -48,11 +48,15 @@ pub struct Block {
 }
 
 fn scene_of(conn: &Connection, block_id: i64) -> DbResult<i64> {
-    conn.query_row("SELECT scene_id FROM scene_blocks WHERE id = ?1", [block_id], |r| r.get(0))
-        .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => DbError::NotFound(block_id),
-            other => other.into(),
-        })
+    conn.query_row(
+        "SELECT scene_id FROM scene_blocks WHERE id = ?1",
+        [block_id],
+        |r| r.get(0),
+    )
+    .map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => DbError::NotFound(block_id),
+        other => other.into(),
+    })
 }
 
 fn reindex(conn: &Connection, scene_id: i64) -> DbResult<()> {
@@ -79,7 +83,14 @@ pub fn list(conn: &Connection, scene_id: i64) -> DbResult<Vec<Block>> {
         .collect::<Result<Vec<_>, _>>()?;
     rows.into_iter()
         .map(|(id, position, ty, character_id, character_title, text)| {
-            Ok(Block { id, position, block_type: BlockType::parse(&ty)?, character_id, character_title, text })
+            Ok(Block {
+                id,
+                position,
+                block_type: BlockType::parse(&ty)?,
+                character_id,
+                character_title,
+                text,
+            })
         })
         .collect()
 }
@@ -98,7 +109,11 @@ pub fn add(
         [scene_id],
         |r| r.get(0),
     )?;
-    let character = if block_type == BlockType::Dialogue { character } else { None };
+    let character = if block_type == BlockType::Dialogue {
+        character
+    } else {
+        None
+    };
     tx.execute(
         "INSERT INTO scene_blocks (scene_id, position, block_type, character_id, text)
          VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -119,7 +134,11 @@ pub fn update(
 ) -> DbResult<()> {
     let scene = scene_of(conn, block_id)?;
     let tx = Atomic::begin(conn)?;
-    let character = if block_type == BlockType::Dialogue { character } else { None };
+    let character = if block_type == BlockType::Dialogue {
+        character
+    } else {
+        None
+    };
     tx.execute(
         "UPDATE scene_blocks SET block_type = ?2, character_id = ?3, text = ?4 WHERE id = ?1",
         params![block_id, block_type.code(), character, text],
@@ -140,7 +159,11 @@ pub fn delete(conn: &Connection, block_id: i64) -> DbResult<()> {
 pub fn move_block(conn: &Connection, block_id: i64, up: bool) -> DbResult<()> {
     let scene = scene_of(conn, block_id)?;
     let tx = Atomic::begin(conn)?;
-    let pos: i64 = tx.query_row("SELECT position FROM scene_blocks WHERE id = ?1", [block_id], |r| r.get(0))?;
+    let pos: i64 = tx.query_row(
+        "SELECT position FROM scene_blocks WHERE id = ?1",
+        [block_id],
+        |r| r.get(0),
+    )?;
     let sql = if up {
         "SELECT id, position FROM scene_blocks WHERE scene_id = ?1 AND position < ?2 ORDER BY position DESC LIMIT 1"
     } else {
@@ -149,27 +172,56 @@ pub fn move_block(conn: &Connection, block_id: i64, up: bool) -> DbResult<()> {
     let neighbor: Option<(i64, i64)> = tx
         .query_row(sql, params![scene, pos], |r| Ok((r.get(0)?, r.get(1)?)))
         .map(Some)
-        .or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(None) } else { Err(e) })?;
-    let Some((other, other_pos)) = neighbor else { return Ok(()) };
+        .or_else(|e| {
+            if matches!(e, rusqlite::Error::QueryReturnedNoRows) {
+                Ok(None)
+            } else {
+                Err(e)
+            }
+        })?;
+    let Some((other, other_pos)) = neighbor else {
+        return Ok(());
+    };
     // Position temporaire : la contrainte UNIQUE (scene, position) interdit un échange direct.
-    tx.execute("UPDATE scene_blocks SET position = -1 WHERE id = ?1", [block_id])?;
-    tx.execute("UPDATE scene_blocks SET position = ?2 WHERE id = ?1", params![other, pos])?;
-    tx.execute("UPDATE scene_blocks SET position = ?2 WHERE id = ?1", params![block_id, other_pos])?;
+    tx.execute(
+        "UPDATE scene_blocks SET position = -1 WHERE id = ?1",
+        [block_id],
+    )?;
+    tx.execute(
+        "UPDATE scene_blocks SET position = ?2 WHERE id = ?1",
+        params![other, pos],
+    )?;
+    tx.execute(
+        "UPDATE scene_blocks SET position = ?2 WHERE id = ?1",
+        params![block_id, other_pos],
+    )?;
     reindex(&tx, scene)?;
     tx.commit()
 }
 
 /// (acte, séquence) d'une scène.
 pub fn structure(conn: &Connection, scene_id: i64) -> DbResult<(Option<i64>, Option<i64>)> {
-    conn.query_row("SELECT act, sequence FROM scenes WHERE id = ?1", [scene_id], |r| Ok((r.get(0)?, r.get(1)?)))
-        .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => DbError::NotFound(scene_id),
-            other => other.into(),
-        })
+    conn.query_row(
+        "SELECT act, sequence FROM scenes WHERE id = ?1",
+        [scene_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => DbError::NotFound(scene_id),
+        other => other.into(),
+    })
 }
 
-pub fn set_structure(conn: &Connection, scene_id: i64, act: Option<i64>, sequence: Option<i64>) -> DbResult<()> {
-    let n = conn.execute("UPDATE scenes SET act = ?2, sequence = ?3 WHERE id = ?1", params![scene_id, act, sequence])?;
+pub fn set_structure(
+    conn: &Connection,
+    scene_id: i64,
+    act: Option<i64>,
+    sequence: Option<i64>,
+) -> DbResult<()> {
+    let n = conn.execute(
+        "UPDATE scenes SET act = ?2, sequence = ?3 WHERE id = ?1",
+        params![scene_id, act, sequence],
+    )?;
     if n == 0 {
         return Err(DbError::NotFound(scene_id));
     }
@@ -194,7 +246,13 @@ pub fn scenes_of(conn: &Connection, episode_id: i64) -> DbResult<Vec<SceneInfo>>
          WHERE s.episode_id = ?1 ORDER BY s.position",
     )?;
     let rows = stmt.query_map([episode_id], |r| {
-        Ok(SceneInfo { id: r.get(0)?, title: r.get(1)?, position: r.get(2)?, act: r.get(3)?, sequence: r.get(4)? })
+        Ok(SceneInfo {
+            id: r.get(0)?,
+            title: r.get(1)?,
+            position: r.get(2)?,
+            act: r.get(3)?,
+            sequence: r.get(4)?,
+        })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
@@ -203,24 +261,39 @@ pub fn scenes_of(conn: &Connection, episode_id: i64) -> DbResult<Vec<SceneInfo>>
 pub fn swap_scenes(conn: &Connection, a: i64, b: i64) -> DbResult<()> {
     let tx = Atomic::begin(conn)?;
     let get = |id: i64| -> DbResult<(i64, i64)> {
-        tx.query_row("SELECT episode_id, position FROM scenes WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => DbError::NotFound(id),
-                other => other.into(),
-            })
+        tx.query_row(
+            "SELECT episode_id, position FROM scenes WHERE id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => DbError::NotFound(id),
+            other => other.into(),
+        })
     };
     let ((ea, pa), (eb, pb)) = (get(a)?, get(b)?);
     if ea != eb {
-        return Err(DbError::Invalid("les deux scènes ne sont pas dans le même épisode".into()));
+        return Err(DbError::Invalid(
+            "les deux scènes ne sont pas dans le même épisode".into(),
+        ));
     }
     tx.execute("UPDATE scenes SET position = -1 WHERE id = ?1", [a])?;
-    tx.execute("UPDATE scenes SET position = ?2 WHERE id = ?1", params![b, pa])?;
-    tx.execute("UPDATE scenes SET position = ?2 WHERE id = ?1", params![a, pb])?;
+    tx.execute(
+        "UPDATE scenes SET position = ?2 WHERE id = ?1",
+        params![b, pa],
+    )?;
+    tx.execute(
+        "UPDATE scenes SET position = ?2 WHERE id = ?1",
+        params![a, pb],
+    )?;
     tx.commit()
 }
 
 fn speaker(b: &Block) -> String {
-    b.character_title.clone().unwrap_or_else(|| "?".to_string()).to_uppercase()
+    b.character_title
+        .clone()
+        .unwrap_or_else(|| "?".to_string())
+        .to_uppercase()
 }
 
 /// Un bloc en texte brut, façon scénario.
@@ -250,7 +323,10 @@ pub fn episode_text(conn: &Connection, episode_id: i64) -> DbResult<String> {
             out.push_str(&format!("=== ACTE {} ===\n\n", s.act.unwrap_or_default()));
         }
         if (s.sequence != last_seq || s.act != last_act) && s.sequence.is_some() {
-            out.push_str(&format!("--- Séquence {} ---\n\n", s.sequence.unwrap_or_default()));
+            out.push_str(&format!(
+                "--- Séquence {} ---\n\n",
+                s.sequence.unwrap_or_default()
+            ));
         }
         (last_act, last_seq) = (s.act, s.sequence);
         out.push_str(&format!("SCÈNE {} — {}\n", s.position, s.title));
@@ -280,7 +356,13 @@ mod tests {
         let a = add(&conn, sc, BlockType::Action, None, "Alice entre.").unwrap();
         let b = add(&conn, sc, BlockType::Dialogue, None, "Bonsoir !").unwrap();
         let c = add(&conn, sc, BlockType::Direction, None, "elle sourit").unwrap();
-        let order = |conn: &Connection| list(conn, sc).unwrap().into_iter().map(|x| x.id).collect::<Vec<_>>();
+        let order = |conn: &Connection| {
+            list(conn, sc)
+                .unwrap()
+                .into_iter()
+                .map(|x| x.id)
+                .collect::<Vec<_>>()
+        };
         assert_eq!(order(&conn), [a, b, c]);
         move_block(&conn, c, true).unwrap();
         assert_eq!(order(&conn), [a, c, b]);
@@ -312,14 +394,23 @@ mod tests {
     fn dialogue_is_searchable_and_survives_saving_the_scene_fields() {
         let conn = open_in_memory().unwrap();
         let (_, sc) = scene(&conn);
-        add(&conn, sc, BlockType::Dialogue, None, "Quelle merveilleuse surprise").unwrap();
+        add(
+            &conn,
+            sc,
+            BlockType::Dialogue,
+            None,
+            "Quelle merveilleuse surprise",
+        )
+        .unwrap();
         assert_eq!(nodes::search_text(&conn, "merveilleuse").unwrap().len(), 1);
         fields::save(&conn, NodeKind::Scene, sc, &["notes de scène".to_string()]).unwrap();
         assert_eq!(nodes::search_text(&conn, "merveilleuse").unwrap().len(), 1); // pas écrasé
         assert_eq!(nodes::search_text(&conn, "notes").unwrap().len(), 1);
         let first = list(&conn, sc).unwrap()[0].id;
         delete(&conn, first).unwrap();
-        assert!(nodes::search_text(&conn, "merveilleuse").unwrap().is_empty());
+        assert!(nodes::search_text(&conn, "merveilleuse")
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -336,7 +427,9 @@ mod tests {
         let (_, sc) = scene(&conn);
         add(&conn, sc, BlockType::Action, None, "x").unwrap();
         nodes::delete(&conn, sc).unwrap();
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM scene_blocks", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM scene_blocks", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 0);
     }
 
@@ -346,7 +439,11 @@ mod tests {
         let (ep, s1) = scene(&conn);
         let s2 = nodes::create_scene(&conn, ep, "La dispute", 2).unwrap();
         swap_scenes(&conn, s1, s2).unwrap();
-        let titles: Vec<_> = scenes_of(&conn, ep).unwrap().into_iter().map(|s| s.title).collect();
+        let titles: Vec<_> = scenes_of(&conn, ep)
+            .unwrap()
+            .into_iter()
+            .map(|s| s.title)
+            .collect();
         assert_eq!(titles, ["La dispute", "Le dîner"]);
         let other = nodes::create_episode(&conn, "Ép. 2", 1, 2).unwrap();
         let s3 = nodes::create_scene(&conn, other, "Ailleurs", 1).unwrap();
@@ -366,7 +463,14 @@ mod tests {
         add(&conn, sc, BlockType::Direction, None, "elle sourit").unwrap();
         let text = episode_text(&conn, ep).unwrap();
         assert!(text.contains("=== ACTE 1 ===") && text.contains("--- Séquence 2 ---"));
-        assert!(text.contains("SCÈNE 1 — Le dîner") && text.contains("ALICE : Bonsoir !") && text.contains("(elle sourit)"));
-        assert_eq!(block_markdown(&list(&conn, sc).unwrap()[1]), "**ALICE** : Bonsoir !");
+        assert!(
+            text.contains("SCÈNE 1 — Le dîner")
+                && text.contains("ALICE : Bonsoir !")
+                && text.contains("(elle sourit)")
+        );
+        assert_eq!(
+            block_markdown(&list(&conn, sc).unwrap()[1]),
+            "**ALICE** : Bonsoir !"
+        );
     }
 }

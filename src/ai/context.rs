@@ -16,7 +16,10 @@ use crate::db::{
 /// Éléments dans l'ordre choisi ; avec `with_neighbors`, leurs voisins directs sont ajoutés à la suite.
 pub fn gather(conn: &Connection, ids: &[i64], with_neighbors: bool) -> DbResult<Vec<ContextItem>> {
     let all_links = links::all(conn)?;
-    let titles: HashMap<i64, String> = nodes::all(conn)?.into_iter().map(|n| (n.id, n.title)).collect();
+    let titles: HashMap<i64, String> = nodes::all(conn)?
+        .into_iter()
+        .map(|n| (n.id, n.title))
+        .collect();
     let dates: HashMap<i64, Option<String>> = timeline::list_events(conn, None)?
         .into_iter()
         .map(|e| (e.id, e.story_start))
@@ -41,7 +44,9 @@ pub fn gather(conn: &Connection, ids: &[i64], with_neighbors: bool) -> DbResult<
 
     let mut out = Vec::new();
     for id in order {
-        let Ok(node) = nodes::get(conn, id) else { continue }; // supprimé entre-temps
+        let Ok(node) = nodes::get(conn, id) else {
+            continue;
+        }; // supprimé entre-temps
         let defs = fields::defs(node.kind);
         let mut shown = Vec::new();
         for (d, v) in defs.iter().zip(fields::load(conn, node.kind, id)?) {
@@ -61,8 +66,15 @@ pub fn gather(conn: &Connection, ids: &[i64], with_neighbors: bool) -> DbResult<
             .iter()
             .filter(|l| l.src_id == id || l.dst_id == id)
             .map(|l| {
-                let (arrow, other) = if l.src_id == id { ("→", l.dst_id) } else { ("←", l.src_id) };
-                let what = l.label.clone().unwrap_or_else(|| link_type_label(&l.link_type).to_string());
+                let (arrow, other) = if l.src_id == id {
+                    ("→", l.dst_id)
+                } else {
+                    ("←", l.src_id)
+                };
+                let what = l
+                    .label
+                    .clone()
+                    .unwrap_or_else(|| link_type_label(&l.link_type).to_string());
                 Conn {
                     text: format!("{arrow} {what}"),
                     target: other,

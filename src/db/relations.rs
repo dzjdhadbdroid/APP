@@ -57,14 +57,22 @@ pub fn list(conn: &Connection) -> DbResult<Vec<Relation>> {
 }
 
 /// Crée une relation entre deux personnages (refuse les autres types d'éléments).
-pub fn create(conn: &Connection, a: i64, b: i64, label: &str, closeness: Option<i64>) -> DbResult<i64> {
+pub fn create(
+    conn: &Connection,
+    a: i64,
+    b: i64,
+    label: &str,
+    closeness: Option<i64>,
+) -> DbResult<i64> {
     let n: i64 = conn.query_row(
         "SELECT COUNT(*) FROM nodes WHERE kind = 'character' AND id IN (?1, ?2)",
         params![a, b],
         |r| r.get(0),
     )?;
     if a == b || n != 2 {
-        return Err(DbError::Invalid("une relation relie deux personnages différents".into()));
+        return Err(DbError::Invalid(
+            "une relation relie deux personnages différents".into(),
+        ));
     }
     super::links::create(conn, a, b, "relation", Some(label), closeness)
 }
@@ -113,7 +121,12 @@ pub fn history(conn: &Connection, link: i64) -> DbResult<Vec<HistoryEntry>> {
         "SELECT id, note, event_id, created_at FROM link_history WHERE link_id = ?1 ORDER BY id DESC",
     )?;
     let rows = stmt.query_map([link], |r| {
-        Ok(HistoryEntry { id: r.get(0)?, note: r.get(1)?, event_id: r.get(2)?, created_at: r.get(3)? })
+        Ok(HistoryEntry {
+            id: r.get(0)?,
+            note: r.get(1)?,
+            event_id: r.get(2)?,
+            created_at: r.get(3)?,
+        })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
@@ -132,10 +145,22 @@ mod tests {
         assert!(create(&conn, a, p, "ami", None).is_err());
         assert!(create(&conn, a, a, "ami", None).is_err());
         let id = create(&conn, a, b, "colocataires", Some(6)).unwrap();
-        update(&conn, id, "amis", Some(8), "se chamaillent", "il ronfle", "").unwrap();
+        update(
+            &conn,
+            id,
+            "amis",
+            Some(8),
+            "se chamaillent",
+            "il ronfle",
+            "",
+        )
+        .unwrap();
         assert!(update(&conn, id, "x", Some(11), "", "", "").is_err());
         let r = &list(&conn).unwrap()[0];
-        assert_eq!((r.label.as_str(), r.closeness, r.a_knows.as_str()), ("amis", Some(8), "il ronfle"));
+        assert_eq!(
+            (r.label.as_str(), r.closeness, r.a_knows.as_str()),
+            ("amis", Some(8), "il ronfle")
+        );
         add_history(&conn, id, "Dispute pour le loyer", None).unwrap();
         assert!(add_history(&conn, id, "  ", None).is_err());
         assert_eq!(history(&conn, id).unwrap().len(), 1);

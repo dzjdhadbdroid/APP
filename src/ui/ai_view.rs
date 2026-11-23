@@ -215,48 +215,64 @@ impl StudioApp {
             self.ai.ctx.retain(|x| *x != id);
         }
         if self.ai.ctx.is_empty() {
-            ui.label("Aucun élément. Ajoute-en ci-dessous, ou depuis une fiche avec « → Assistant IA ».");
+            ui.label(
+                "Aucun élément. Ajoute-en ci-dessous, ou depuis une fiche avec « → Assistant IA ».",
+            );
         }
         let mut add = None;
-        egui::ComboBox::from_id_salt("ai_add").selected_text("Ajouter un élément…").show_ui(ui, |ui| {
-            for n in self.nodes.iter().filter(|n| !self.ai.ctx.contains(&n.id)) {
-                if ui.selectable_label(false, format!("{} · {}", n.kind.label(), n.title)).clicked() {
-                    add = Some(n.id);
+        egui::ComboBox::from_id_salt("ai_add")
+            .selected_text("Ajouter un élément…")
+            .show_ui(ui, |ui| {
+                for n in self.nodes.iter().filter(|n| !self.ai.ctx.contains(&n.id)) {
+                    if ui
+                        .selectable_label(false, format!("{} · {}", n.kind.label(), n.title))
+                        .clicked()
+                    {
+                        add = Some(n.id);
+                    }
                 }
-            }
-        });
+            });
         if let Some(id) = add {
             self.ai.add_to_context(id);
         }
-        ui.checkbox(&mut self.ai.neighbors, "Inclure aussi les éléments directement reliés");
+        ui.checkbox(
+            &mut self.ai.neighbors,
+            "Inclure aussi les éléments directement reliés",
+        );
 
-        egui::CollapsingHeader::new("Aperçu exact de ce qui sera envoyé").id_salt("ai_preview").show(ui, |ui| {
-            match context::gather(&self.conn, &self.ai.ctx, self.ai.neighbors) {
-                Ok(items) => {
-                    let (text, included) = prompt::render_context(&items, MAX_CONTEXT_CHARS);
-                    ui.label(format!(
-                        "{included} élément(s) sur {}, {} caractères.",
-                        items.len(),
-                        text.chars().count()
-                    ));
-                    egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
-                        ui.monospace(text);
-                    });
+        egui::CollapsingHeader::new("Aperçu exact de ce qui sera envoyé")
+            .id_salt("ai_preview")
+            .show(ui, |ui| {
+                match context::gather(&self.conn, &self.ai.ctx, self.ai.neighbors) {
+                    Ok(items) => {
+                        let (text, included) = prompt::render_context(&items, MAX_CONTEXT_CHARS);
+                        ui.label(format!(
+                            "{included} élément(s) sur {}, {} caractères.",
+                            items.len(),
+                            text.chars().count()
+                        ));
+                        egui::ScrollArea::vertical()
+                            .max_height(220.0)
+                            .show(ui, |ui| {
+                                ui.monospace(text);
+                            });
+                    }
+                    Err(e) => {
+                        ui.label(e.to_string());
+                    }
                 }
-                Err(e) => {
-                    ui.label(e.to_string());
-                }
-            }
-        });
+            });
 
         // ── tâche ──
         ui.separator();
         ui.heading("Demande");
-        egui::ComboBox::from_id_salt("ai_task").selected_text(self.ai.task.label()).show_ui(ui, |ui| {
-            for t in Task::ALL {
-                ui.selectable_value(&mut self.ai.task, t, t.label());
-            }
-        });
+        egui::ComboBox::from_id_salt("ai_task")
+            .selected_text(self.ai.task.label())
+            .show_ui(ui, |ui| {
+                for t in Task::ALL {
+                    ui.selectable_value(&mut self.ai.task, t, t.label());
+                }
+            });
         ui.add(
             egui::TextEdit::multiline(&mut self.ai.question)
                 .hint_text("Précisions ou question libre (facultatif sauf pour « Question libre »)")
@@ -266,7 +282,10 @@ impl StudioApp {
         let busy = self.ai.rx.is_some();
         let mut send = false;
         ui.horizontal(|ui| {
-            if ui.add_enabled(!busy, egui::Button::new("Envoyer à l'IA")).clicked() {
+            if ui
+                .add_enabled(!busy, egui::Button::new("Envoyer à l'IA"))
+                .clicked()
+            {
                 send = true;
             }
             if busy {
@@ -282,18 +301,26 @@ impl StudioApp {
         if let Some(err) = &self.ai.error {
             ui.colored_label(Color32::from_rgb(255, 110, 110), err);
         }
-        let Some(answer) = self.ai.answer.clone() else { return };
+        let Some(answer) = self.ai.answer.clone() else {
+            return;
+        };
         ui.separator();
         ui.heading("Réponse");
         if self.ai.omitted > 0 {
             ui.colored_label(
                 Color32::from_rgb(255, 180, 80),
-                format!("{} élément(s) n'ont pas été envoyés (limite de taille du contexte).", self.ai.omitted),
+                format!(
+                    "{} élément(s) n'ont pas été envoyés (limite de taille du contexte).",
+                    self.ai.omitted
+                ),
             );
         }
-        egui::ScrollArea::vertical().id_salt("ai_answer").max_height(360.0).show(ui, |ui| {
-            ui.add(egui::Label::new(answer.as_str()).selectable(true));
-        });
+        egui::ScrollArea::vertical()
+            .id_salt("ai_answer")
+            .max_height(360.0)
+            .show(ui, |ui| {
+                ui.add(egui::Label::new(answer.as_str()).selectable(true));
+            });
 
         let (valid, unknown) = prompt::extract_citations(&answer, &self.ai.allowed);
         let mut open = None;
@@ -301,7 +328,10 @@ impl StudioApp {
             ui.horizontal_wrapped(|ui| {
                 ui.label("Sources citées :");
                 for id in &valid {
-                    if ui.link(format!("#{id} {}", title_in(&self.nodes, *id))).clicked() {
+                    if ui
+                        .link(format!("#{id} {}", title_in(&self.nodes, *id)))
+                        .clicked()
+                    {
                         open = Some(*id);
                     }
                 }
@@ -315,7 +345,10 @@ impl StudioApp {
             );
         }
         if valid.is_empty() && unknown.is_empty() {
-            ui.colored_label(Color32::from_rgb(255, 180, 80), "Aucune source citée : vérifie cette réponse avec soin.");
+            ui.colored_label(
+                Color32::from_rgb(255, 180, 80),
+                "Aucune source citée : vérifie cette réponse avec soin.",
+            );
         }
 
         // ── actions explicites de l'utilisateur ──
@@ -324,23 +357,39 @@ impl StudioApp {
             if ui.button("Copier la réponse").clicked() {
                 ui.ctx().copy_text(answer.clone());
             }
-            let target = self
-                .ai
-                .note_target
-                .map_or_else(|| "Ajouter aux notes de…".to_string(), |t| title_in(&self.nodes, t).to_string());
-            egui::ComboBox::from_id_salt("ai_note_target").selected_text(target).show_ui(ui, |ui| {
-                for n in &self.nodes {
-                    ui.selectable_value(&mut self.ai.note_target, Some(n.id), format!("{} · {}", n.kind.label(), n.title));
-                }
-            });
-            if ui.add_enabled(self.ai.note_target.is_some(), egui::Button::new("Ajouter à ses notes")).clicked() {
+            let target = self.ai.note_target.map_or_else(
+                || "Ajouter aux notes de…".to_string(),
+                |t| title_in(&self.nodes, t).to_string(),
+            );
+            egui::ComboBox::from_id_salt("ai_note_target")
+                .selected_text(target)
+                .show_ui(ui, |ui| {
+                    for n in &self.nodes {
+                        ui.selectable_value(
+                            &mut self.ai.note_target,
+                            Some(n.id),
+                            format!("{} · {}", n.kind.label(), n.title),
+                        );
+                    }
+                });
+            if ui
+                .add_enabled(
+                    self.ai.note_target.is_some(),
+                    egui::Button::new("Ajouter à ses notes"),
+                )
+                .clicked()
+            {
                 add_note = self.ai.note_target;
             }
         });
         if let Some(target) = add_note {
             let text = format!("[Suggestion IA — à relire]\n{answer}");
-            if self.apply(|c| history::append_note(c, target, &text)).is_some() {
-                self.status = "Ajouté aux notes (ancienne version conservée dans l'historique).".to_string();
+            if self
+                .apply(|c| history::append_note(c, target, &text))
+                .is_some()
+            {
+                self.status =
+                    "Ajouté aux notes (ancienne version conservée dans l'historique).".to_string();
             }
         }
         if let Some(id) = open {

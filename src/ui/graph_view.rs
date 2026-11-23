@@ -106,7 +106,11 @@ impl StudioApp {
         }
 
         // ── éléments visibles ──
-        let linked: HashSet<i64> = self.links.iter().flat_map(|l| [l.src_id, l.dst_id]).collect();
+        let linked: HashSet<i64> = self
+            .links
+            .iter()
+            .flat_map(|l| [l.src_id, l.dst_id])
+            .collect();
         let kinds: HashMap<i64, NodeKind> = self.nodes.iter().map(|n| (n.id, n.kind)).collect();
         let focus = self.graph.focus;
         let mut ids: Vec<i64> = match focus {
@@ -120,7 +124,9 @@ impl StudioApp {
         };
         ids.retain(|id| {
             Some(*id) == focus
-                || (kinds.get(id).is_some_and(|k| !self.graph.hidden.contains(k))
+                || (kinds
+                    .get(id)
+                    .is_some_and(|k| !self.graph.hidden.contains(k))
                     && (!self.graph.only_isolated || !linked.contains(id)))
         });
         let visible: HashSet<i64> = ids.iter().copied().collect();
@@ -241,7 +247,11 @@ impl StudioApp {
             if self.selected == Some(*id) {
                 painter.circle_stroke(sp, radius + 2.0, Stroke::new(2.5, Color32::WHITE));
             } else if !linked.contains(id) {
-                painter.circle_stroke(sp, radius + 2.0, Stroke::new(2.0, Color32::from_rgb(220, 70, 70)));
+                painter.circle_stroke(
+                    sp,
+                    radius + 2.0,
+                    Stroke::new(2.0, Color32::from_rgb(220, 70, 70)),
+                );
             }
             if !needle.is_empty() && title.to_lowercase().contains(&needle) {
                 painter.circle_stroke(sp, radius + 6.0, Stroke::new(2.0, Color32::YELLOW));

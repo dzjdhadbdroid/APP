@@ -43,11 +43,19 @@ impl StudioApp {
     pub(super) fn timeline_view(&mut self, ui: &mut egui::Ui) {
         ui.heading("Chronologie narrative");
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.timeline.tab, Tab::Real, "Chronologie réelle (univers)");
+            ui.selectable_value(
+                &mut self.timeline.tab,
+                Tab::Real,
+                "Chronologie réelle (univers)",
+            );
             ui.selectable_value(&mut self.timeline.tab, Tab::Air, "Ordre de diffusion");
             ui.selectable_value(&mut self.timeline.tab, Tab::Scenes, "Ordre des scènes");
             ui.selectable_value(&mut self.timeline.tab, Tab::Season, "Par saison");
-            ui.selectable_value(&mut self.timeline.tab, Tab::Compare, "Comparer des personnages");
+            ui.selectable_value(
+                &mut self.timeline.tab,
+                Tab::Compare,
+                "Comparer des personnages",
+            );
         });
         ui.separator();
         match self.timeline.tab {
@@ -89,7 +97,10 @@ impl StudioApp {
             );
             if ui.button("Créer").clicked() && !self.timeline.new_title.trim().is_empty() {
                 let title = self.timeline.new_title.trim().to_string();
-                if self.apply(|c| nodes::create(c, NodeKind::Event, &title)).is_some() {
+                if self
+                    .apply(|c| nodes::create(c, NodeKind::Event, &title))
+                    .is_some()
+                {
                     self.timeline.new_title.clear();
                 }
             }
@@ -100,9 +111,17 @@ impl StudioApp {
         );
         ui.horizontal(|ui| {
             ui.label("Période : de");
-            ui.add(egui::TextEdit::singleline(&mut self.timeline.from).hint_text("AAAA-MM").desired_width(80.0));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.timeline.from)
+                    .hint_text("AAAA-MM")
+                    .desired_width(80.0),
+            );
             ui.label("à");
-            ui.add(egui::TextEdit::singleline(&mut self.timeline.to).hint_text("AAAA-MM").desired_width(80.0));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.timeline.to)
+                    .hint_text("AAAA-MM")
+                    .desired_width(80.0),
+            );
         });
         ui.add_space(6.0);
 
@@ -126,7 +145,9 @@ impl StudioApp {
                     && (rows
                         .get(i.wrapping_sub(1))
                         .is_some_and(|p| p.story_sort == row.story_sort)
-                        || rows.get(i + 1).is_some_and(|n| n.story_sort == row.story_sort));
+                        || rows
+                            .get(i + 1)
+                            .is_some_and(|n| n.story_sort == row.story_sort));
                 let buf = self.timeline.bufs.entry(row.id).or_insert_with(|| EvBuf {
                     date: row.story_start.clone().unwrap_or_default(),
                     importance: row.importance,
@@ -151,19 +172,30 @@ impl StudioApp {
                             .hint_text("AAAA-MM-JJ")
                             .desired_width(90.0),
                     );
-                    ui.add(egui::DragValue::new(&mut buf.importance).range(1..=5).prefix("importance "));
+                    ui.add(
+                        egui::DragValue::new(&mut buf.importance)
+                            .range(1..=5)
+                            .prefix("importance "),
+                    );
                     egui::ComboBox::from_id_salt(("status", row.id))
                         .selected_text(timeline::status_label(&buf.status))
                         .show_ui(ui, |ui| {
                             for s in STATUSES {
-                                ui.selectable_value(&mut buf.status, s.to_string(), timeline::status_label(s));
+                                ui.selectable_value(
+                                    &mut buf.status,
+                                    s.to_string(),
+                                    timeline::status_label(s),
+                                );
                             }
                         });
                     if changed && ui.button("Appliquer").clicked() {
-                        to_apply = Some((row.id, buf.date.clone(), buf.importance, buf.status.clone()));
+                        to_apply =
+                            Some((row.id, buf.date.clone(), buf.importance, buf.status.clone()));
                     }
                     if simultaneous {
-                        ui.label(RichText::new("⇄ simultané").color(Color32::from_rgb(120, 200, 255)));
+                        ui.label(
+                            RichText::new("⇄ simultané").color(Color32::from_rgb(120, 200, 255)),
+                        );
                     }
                     if row.story_sort.is_none() {
                         ui.label(RichText::new("non daté").color(Color32::from_gray(120)));
@@ -232,7 +264,11 @@ impl StudioApp {
             for r in &rows {
                 if r.episode_title != last {
                     ui.add_space(6.0);
-                    ui.label(RichText::new(&r.episode_title).strong().color(kind_color(NodeKind::Episode)));
+                    ui.label(
+                        RichText::new(&r.episode_title)
+                            .strong()
+                            .color(kind_color(NodeKind::Episode)),
+                    );
                     last = &r.episode_title;
                 }
                 ui.horizontal(|ui| {
@@ -269,19 +305,21 @@ impl StudioApp {
         );
         let rows = timeline::events_of_season(&self.conn, self.timeline.season).unwrap_or_default();
         let mut open = None;
-        egui::ScrollArea::vertical().id_salt("season_events").show(ui, |ui| {
-            if rows.is_empty() {
-                ui.label("Aucun événement relié à cette saison.");
-            }
-            for r in &rows {
-                ui.horizontal(|ui| {
-                    ui.label(r.story_start.clone().unwrap_or_else(|| "non daté".into()));
-                    if ui.link(&r.title).clicked() {
-                        open = Some(r.id);
-                    }
-                });
-            }
-        });
+        egui::ScrollArea::vertical()
+            .id_salt("season_events")
+            .show(ui, |ui| {
+                if rows.is_empty() {
+                    ui.label("Aucun événement relié à cette saison.");
+                }
+                for r in &rows {
+                    ui.horizontal(|ui| {
+                        ui.label(r.story_start.clone().unwrap_or_else(|| "non daté".into()));
+                        if ui.link(&r.title).clicked() {
+                            open = Some(r.id);
+                        }
+                    });
+                }
+            });
         if let Some(id) = open {
             self.go_to(id);
         }
@@ -309,7 +347,9 @@ impl StudioApp {
                 }
             }
         });
-        self.timeline.compare.retain(|c| characters.iter().any(|(id, _)| id == c));
+        self.timeline
+            .compare
+            .retain(|c| characters.iter().any(|(id, _)| id == c));
         if self.timeline.compare.len() < 2 {
             ui.label("Coche au moins deux personnages pour comparer leurs chronologies.");
             return;
@@ -328,30 +368,38 @@ impl StudioApp {
         let mut events = timeline::list_events(&self.conn, None).unwrap_or_default();
         events.retain(|e| per_char.iter().any(|l| l.contains(&e.id)));
         let mut open = None;
-        egui::ScrollArea::both().id_salt("compare_events").show(ui, |ui| {
-            egui::Grid::new("compare_grid").striped(true).show(ui, |ui| {
-                ui.label(RichText::new("Date").strong());
-                ui.label(RichText::new("Événement").strong());
-                for c in &chosen {
-                    ui.label(RichText::new(super::title_in(&self.nodes, *c)).strong());
-                }
-                ui.end_row();
-                for (i, e) in events.iter().enumerate() {
-                    let same = e.story_sort.is_some()
-                        && (events.get(i.wrapping_sub(1)).is_some_and(|p| p.story_sort == e.story_sort)
-                            || events.get(i + 1).is_some_and(|n| n.story_sort == e.story_sort));
-                    let date = e.story_start.clone().unwrap_or_else(|| "non daté".into());
-                    ui.label(if same { format!("{date} ⇄") } else { date });
-                    if ui.link(&e.title).clicked() {
-                        open = Some(e.id);
-                    }
-                    for list in &per_char {
-                        ui.label(if list.contains(&e.id) { "●" } else { "" });
-                    }
-                    ui.end_row();
-                }
+        egui::ScrollArea::both()
+            .id_salt("compare_events")
+            .show(ui, |ui| {
+                egui::Grid::new("compare_grid")
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.label(RichText::new("Date").strong());
+                        ui.label(RichText::new("Événement").strong());
+                        for c in &chosen {
+                            ui.label(RichText::new(super::title_in(&self.nodes, *c)).strong());
+                        }
+                        ui.end_row();
+                        for (i, e) in events.iter().enumerate() {
+                            let same = e.story_sort.is_some()
+                                && (events
+                                    .get(i.wrapping_sub(1))
+                                    .is_some_and(|p| p.story_sort == e.story_sort)
+                                    || events
+                                        .get(i + 1)
+                                        .is_some_and(|n| n.story_sort == e.story_sort));
+                            let date = e.story_start.clone().unwrap_or_else(|| "non daté".into());
+                            ui.label(if same { format!("{date} ⇄") } else { date });
+                            if ui.link(&e.title).clicked() {
+                                open = Some(e.id);
+                            }
+                            for list in &per_char {
+                                ui.label(if list.contains(&e.id) { "●" } else { "" });
+                            }
+                            ui.end_row();
+                        }
+                    });
             });
-        });
         if let Some(id) = open {
             self.go_to(id);
         }

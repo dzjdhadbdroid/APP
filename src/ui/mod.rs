@@ -10,6 +10,7 @@ mod nav;
 mod relations_view;
 mod script_view;
 mod settings_view;
+mod theme;
 mod timeline_view;
 
 use std::collections::HashSet;
@@ -26,8 +27,7 @@ use crate::db::{
     knowledge::{self, KnowledgeRow},
     links::{self, Link},
     nodes::{self, Node, NodeKind},
-    places,
-    DbError, DbResult,
+    places, DbError, DbResult,
 };
 
 pub use crate::db::links::{link_type_label, LINK_TYPES};
@@ -253,9 +253,13 @@ impl StudioApp {
                 NodeKind::Event,
             ] {
                 let n = self.nodes.iter().filter(|x| x.kind == kind).count();
-                egui::Frame::group(ui.style()).show(ui, |ui| {
+                theme::card(ui).show(ui, |ui| {
                     ui.vertical(|ui| {
-                        ui.label(RichText::new(n.to_string()).size(30.0).color(kind_color(kind)));
+                        ui.label(
+                            RichText::new(n.to_string())
+                                .size(30.0)
+                                .color(kind_color(kind)),
+                        );
                         if ui.link(kind.label_plural()).clicked() {
                             goto = Some(View::Kind(kind));
                         }
@@ -266,7 +270,10 @@ impl StudioApp {
 
         ui.add_space(12.0);
         let in_progress = nodes::episodes_in_progress(&self.conn).unwrap_or_default();
-        ui.heading(format!("Épisodes en cours d'écriture ({})", in_progress.len()));
+        ui.heading(format!(
+            "Épisodes en cours d'écriture ({})",
+            in_progress.len()
+        ));
         for (id, title) in &in_progress {
             if ui.link(title).clicked() {
                 open = Some(*id);
@@ -305,7 +312,11 @@ impl StudioApp {
             .iter()
             .flat_map(|l| [l.src_id, l.dst_id])
             .collect();
-        let isolated: Vec<&Node> = self.nodes.iter().filter(|n| !linked.contains(&n.id)).collect();
+        let isolated: Vec<&Node> = self
+            .nodes
+            .iter()
+            .filter(|n| !linked.contains(&n.id))
+            .collect();
         ui.heading(format!("Éléments isolés ({})", isolated.len()));
         for n in isolated.into_iter().take(8) {
             ui.horizontal(|ui| {
@@ -316,12 +327,26 @@ impl StudioApp {
             });
         }
         ui.add_space(12.0);
-        let count = |sev: &str| self.alerts.iter().filter(|a| a.status == "open" && a.severity == sev).count();
+        let count = |sev: &str| {
+            self.alerts
+                .iter()
+                .filter(|a| a.status == "open" && a.severity == sev)
+                .count()
+        };
         ui.heading("Alertes de cohérence");
         ui.horizontal(|ui| {
-            ui.label(RichText::new(format!("{} erreur(s)", count("error"))).color(Color32::from_rgb(255, 90, 90)));
-            ui.label(RichText::new(format!("{} attention", count("warning"))).color(Color32::from_rgb(255, 180, 80)));
-            ui.label(RichText::new(format!("{} info", count("info"))).color(Color32::from_rgb(120, 190, 255)));
+            ui.label(
+                RichText::new(format!("{} erreur(s)", count("error")))
+                    .color(Color32::from_rgb(255, 90, 90)),
+            );
+            ui.label(
+                RichText::new(format!("{} attention", count("warning")))
+                    .color(Color32::from_rgb(255, 180, 80)),
+            );
+            ui.label(
+                RichText::new(format!("{} info", count("info")))
+                    .color(Color32::from_rgb(120, 190, 255)),
+            );
             if ui.link("Voir les alertes").clicked() {
                 goto = Some(View::Alerts);
             }
@@ -363,7 +388,11 @@ impl StudioApp {
 
     fn kind_view(&mut self, ui: &mut egui::Ui, kind: NodeKind) {
         let secondary = kind == NodeKind::Character && self.char_secondary;
-        ui.heading(if secondary { "Personnages secondaires" } else { kind.label_plural() });
+        ui.heading(if secondary {
+            "Personnages secondaires"
+        } else {
+            kind.label_plural()
+        });
         ui.horizontal(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.new_title)
@@ -408,7 +437,9 @@ impl StudioApp {
             .nodes
             .iter()
             .filter(|n| n.kind == kind)
-            .filter(|n| kind != NodeKind::Character || secondary_ids.contains(&n.id) == want_secondary)
+            .filter(|n| {
+                kind != NodeKind::Character || secondary_ids.contains(&n.id) == want_secondary
+            })
             .map(|n| (n.id, n.title.clone()))
             .collect();
         let mut clicked = None;
@@ -417,7 +448,10 @@ impl StudioApp {
                 ui.label("Aucun élément.");
             }
             for (id, title) in &items {
-                if ui.selectable_label(self.selected == Some(*id), title).clicked() {
+                if ui
+                    .selectable_label(self.selected == Some(*id), title)
+                    .clicked()
+                {
                     clicked = Some(*id);
                 }
             }
@@ -442,7 +476,8 @@ impl StudioApp {
         let (mut add_know, mut del_know) = (false, None);
         let mut to_ai = false;
         let mut new_parent: Option<Option<i64>> = None;
-        let (cur_parent, kids): (Option<i64>, Vec<(i64, String)>) = if kind == Some(NodeKind::Place) {
+        let (cur_parent, kids): (Option<i64>, Vec<(i64, String)>) = if kind == Some(NodeKind::Place)
+        {
             (
                 places::parent_of(&self.conn, id).unwrap_or(None),
                 places::children(&self.conn, id).unwrap_or_default(),
@@ -685,7 +720,10 @@ impl StudioApp {
         if add_know {
             if let Some(subject) = self.know_form.subject {
                 let event = self.know_form.event;
-                if self.apply(|c| knowledge::add(c, id, subject, event)).is_some() {
+                if self
+                    .apply(|c| knowledge::add(c, id, subject, event))
+                    .is_some()
+                {
                     self.know_form = KnowForm::default();
                 }
             }
@@ -698,7 +736,14 @@ impl StudioApp {
                 let ty = LINK_TYPES[self.link_form.link_type].0;
                 let label = self.link_form.label.trim().to_string();
                 let ok = self.apply(|c| {
-                    links::create(c, id, target, ty, (!label.is_empty()).then_some(label.as_str()), None)
+                    links::create(
+                        c,
+                        id,
+                        target,
+                        ty,
+                        (!label.is_empty()).then_some(label.as_str()),
+                        None,
+                    )
                 });
                 if ok.is_some() {
                     self.link_form = LinkForm::default();
@@ -735,31 +780,40 @@ impl eframe::App for StudioApp {
         self.top_bar(ctx);
         if self.has_sub_nav() {
             egui::SidePanel::left("sub_nav")
-                .exact_width(230.0)
+                .exact_width(240.0)
+                .frame(theme::bar_frame(ctx, egui::Margin::symmetric(12, 10)))
                 .show(ctx, |ui| self.sub_nav(ui));
         }
-        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            ui.label(self.status.as_str());
-        });
-        egui::CentralPanel::default().show(ctx, |ui| {
-            if !self.search.trim().is_empty() {
-                self.search_view(ui);
-                return;
-            }
-            self.page_tabs(ui);
-            match self.view {
-                View::Dashboard => self.dashboard(ui),
-                View::Kind(NodeKind::Episode | NodeKind::Scene) => self.writing_workspace(ui),
-                View::Kind(kind) => self.kind_view(ui, kind),
-                View::Relations => self.relations_view(ui),
-                View::Timeline => self.timeline_view(ui),
-                View::Graph => self.graph_view(ui),
-                View::Alerts => self.alerts_view(ui),
-                View::Data => self.data_view(ui),
-                View::Ai => self.ai_view(ui),
-                View::Settings => self.settings_view(ui),
-            }
-        });
+        egui::TopBottomPanel::bottom("status")
+            .frame(theme::bar_frame(ctx, egui::Margin::symmetric(14, 4)))
+            .show(ctx, |ui| {
+                ui.label(
+                    RichText::new(self.status.as_str())
+                        .small()
+                        .color(theme::muted(ui)),
+                );
+            });
+        egui::CentralPanel::default()
+            .frame(theme::page_frame(ctx))
+            .show(ctx, |ui| {
+                if !self.search.trim().is_empty() {
+                    self.search_view(ui);
+                    return;
+                }
+                self.page_tabs(ui);
+                match self.view {
+                    View::Dashboard => self.dashboard(ui),
+                    View::Kind(NodeKind::Episode | NodeKind::Scene) => self.writing_workspace(ui),
+                    View::Kind(kind) => self.kind_view(ui, kind),
+                    View::Relations => self.relations_view(ui),
+                    View::Timeline => self.timeline_view(ui),
+                    View::Graph => self.graph_view(ui),
+                    View::Alerts => self.alerts_view(ui),
+                    View::Data => self.data_view(ui),
+                    View::Ai => self.ai_view(ui),
+                    View::Settings => self.settings_view(ui),
+                }
+            });
         let idx = nav::section_index(nav::section_of(self.view));
         self.section_view[idx] = self.view;
     }

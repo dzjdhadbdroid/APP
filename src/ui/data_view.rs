@@ -100,8 +100,13 @@ impl StudioApp {
 
         ui.add_space(10.0);
         ui.heading("Restaurer une sauvegarde");
-        ui.label("Remplace tout le contenu actuel. Une sauvegarde de sécurité est créée juste avant.");
-        let backups: Vec<PathBuf> = db::list_backups(&self.data_dir).into_iter().take(30).collect();
+        ui.label(
+            "Remplace tout le contenu actuel. Une sauvegarde de sécurité est créée juste avant.",
+        );
+        let backups: Vec<PathBuf> = db::list_backups(&self.data_dir)
+            .into_iter()
+            .take(30)
+            .collect();
         if backups.is_empty() {
             ui.label("Aucune sauvegarde pour l'instant.");
         }
@@ -110,11 +115,16 @@ impl StudioApp {
         let mut cancel = false;
         egui::ScrollArea::vertical().show(ui, |ui| {
             for p in &backups {
-                let name = p.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+                let name = p
+                    .file_name()
+                    .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
                 ui.horizontal(|ui| {
                     ui.label(&name);
                     if self.confirm_restore.as_ref() == Some(p) {
-                        ui.label(RichText::new("Remplacer tout le contenu ?").color(Color32::from_rgb(255, 180, 80)));
+                        ui.label(
+                            RichText::new("Remplacer tout le contenu ?")
+                                .color(Color32::from_rgb(255, 180, 80)),
+                        );
                         if ui.button("Confirmer").clicked() {
                             confirmed = Some(p.clone());
                         }

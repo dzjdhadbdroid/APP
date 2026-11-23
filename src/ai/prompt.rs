@@ -46,7 +46,10 @@ pub fn render_item(it: &ContextItem) -> String {
         s.push_str(&format!("Sait : {k}\n"));
     }
     for c in &it.connections {
-        s.push_str(&format!("Lien {} « {} » [#{}]\n", c.text, c.target_title, c.target));
+        s.push_str(&format!(
+            "Lien {} « {} » [#{}]\n",
+            c.text, c.target_title, c.target
+        ));
     }
     s
 }
@@ -108,7 +111,11 @@ pub fn extract_citations(text: &str, allowed: &HashSet<i64>) -> (Vec<i64>, Vec<i
             }
             if j > i + 2 && j < b.len() && b[j] == b']' {
                 if let Ok(id) = text[i + 2..j].parse::<i64>() {
-                    let list = if allowed.contains(&id) { &mut valid } else { &mut unknown };
+                    let list = if allowed.contains(&id) {
+                        &mut valid
+                    } else {
+                        &mut unknown
+                    };
                     if !list.contains(&id) {
                         list.push(id);
                     }
@@ -195,7 +202,10 @@ impl Task {
 }
 
 pub fn build_user_prompt(task: Task, question: &str, context: &str) -> String {
-    let mut s = format!("CONTEXTE (bible de la série) :\n{context}\n---\nTÂCHE : {}\n", task.instruction());
+    let mut s = format!(
+        "CONTEXTE (bible de la série) :\n{context}\n---\nTÂCHE : {}\n",
+        task.instruction()
+    );
     let q = question.trim();
     if !q.is_empty() {
         s.push_str(&format!("\nPRÉCISIONS / QUESTION DU SCÉNARISTE :\n{q}\n"));
@@ -231,8 +241,13 @@ mod tests {
     #[test]
     fn connections_and_knowledge_are_rendered_and_citable() {
         let mut a = item(1, "Alice");
-        a.connections.push(Conn { text: "→ frère".into(), target: 2, target_title: "Bob".into() });
-        a.knowledge.push("« Le secret » — appris à « Révélation »".into());
+        a.connections.push(Conn {
+            text: "→ frère".into(),
+            target: 2,
+            target_title: "Bob".into(),
+        });
+        a.knowledge
+            .push("« Le secret » — appris à « Révélation »".into());
         let s = render_item(&a);
         assert!(s.contains("Lien → frère « Bob » [#2]"));
         assert!(s.contains("Sait : « Le secret »"));
@@ -242,7 +257,10 @@ mod tests {
     #[test]
     fn citations_are_split_into_valid_and_unknown() {
         let allowed = HashSet::from([1, 2]);
-        let (v, u) = extract_citations("Alice [#1] craint [#2] mais [#99] et encore [#1], [#x], [#], [#3", &allowed);
+        let (v, u) = extract_citations(
+            "Alice [#1] craint [#2] mais [#99] et encore [#1], [#x], [#], [#3",
+            &allowed,
+        );
         assert_eq!(v, vec![1, 2]);
         assert_eq!(u, vec![99]);
     }
@@ -280,7 +298,11 @@ mod tests {
     #[test]
     fn prompt_contains_context_task_and_question() {
         let p = build_user_prompt(Task::PlotIdeas, "  pour la saison 2 ", "CTX");
-        assert!(p.contains("CTX") && p.contains("5 idées d'intrigues") && p.contains("pour la saison 2"));
+        assert!(
+            p.contains("CTX")
+                && p.contains("5 idées d'intrigues")
+                && p.contains("pour la saison 2")
+        );
         assert!(!build_user_prompt(Task::Free, "  ", "CTX").contains("PRÉCISIONS"));
         assert!(SYSTEM_PROMPT.contains("[#id]"));
     }

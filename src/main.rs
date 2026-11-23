@@ -60,9 +60,6 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Sitcom Studio",
         options,
-        Box::new(move |cc| {
-            cc.egui_ctx.set_visuals(egui::Visuals::dark());
-            Ok(Box::new(ui::StudioApp::new(conn, dir)))
-        }),
+        Box::new(move |cc| Ok(Box::new(ui::StudioApp::new(conn, dir)))),
     )
 }

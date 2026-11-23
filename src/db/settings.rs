@@ -6,7 +6,9 @@ use super::DbResult;
 
 pub fn get(conn: &Connection, key: &str) -> DbResult<Option<String>> {
     Ok(conn
-        .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0))
+        .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+            r.get(0)
+        })
         .optional()?)
 }
 

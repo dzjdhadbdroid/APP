@@ -140,7 +140,11 @@ fn wrap(text: &str, size: f32, bold: bool, max_w: f32) -> Vec<String> {
             lines.push(cut.clone());
             word = word[cut.len()..].to_string();
         }
-        let candidate = if cur.is_empty() { word.clone() } else { format!("{cur} {word}") };
+        let candidate = if cur.is_empty() {
+            word.clone()
+        } else {
+            format!("{cur} {word}")
+        };
         if text_width(&candidate, size, bold) <= max_w {
             cur = candidate;
         } else {
@@ -163,7 +167,12 @@ fn layout(title: &str, markdown: &str) -> Vec<Line> {
     let max_w = PAGE_W - 2.0 * MARGIN_X;
     let mut lines = Vec::new();
     for l in wrap(title, 24.0, true, max_w) {
-        lines.push(Line { text: l, size: 24.0, bold: true, gap_before: 0.0 });
+        lines.push(Line {
+            text: l,
+            size: 24.0,
+            bold: true,
+            gap_before: 0.0,
+        });
     }
     let mut pending_gap: f32 = 10.0;
     for raw in markdown.lines() {
@@ -202,7 +211,11 @@ pub fn markdown_to_pdf(title: &str, markdown: &str) -> Vec<u8> {
     let mut y = PAGE_H - MARGIN_TOP;
     for line in &lines {
         let leading = line.size * 1.3;
-        let need = if pages.last().is_some_and(|p| p.is_empty()) { leading } else { line.gap_before + leading };
+        let need = if pages.last().is_some_and(|p| p.is_empty()) {
+            leading
+        } else {
+            line.gap_before + leading
+        };
         if y - need < MARGIN_BOTTOM && !pages.last().unwrap().is_empty() {
             pages.push(Vec::new());
             y = PAGE_H - MARGIN_TOP;
@@ -232,11 +245,31 @@ pub fn markdown_to_pdf(title: &str, markdown: &str) -> Vec<u8> {
     push_obj(
         &mut out,
         &mut offsets,
-        format!("<< /Type /Pages /Count {n_pages} /Kids [{}] >>", kids.join(" ")).as_bytes(),
+        format!(
+            "<< /Type /Pages /Count {n_pages} /Kids [{}] >>",
+            kids.join(" ")
+        )
+        .as_bytes(),
     );
-    push_obj(&mut out, &mut offsets, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
-    push_obj(&mut out, &mut offsets, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
-    push_obj(&mut out, &mut offsets, format!("<< /Title {} /Producer (Sitcom Studio) >>", info_string(title)).as_bytes());
+    push_obj(
+        &mut out,
+        &mut offsets,
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    );
+    push_obj(
+        &mut out,
+        &mut offsets,
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>",
+    );
+    push_obj(
+        &mut out,
+        &mut offsets,
+        format!(
+            "<< /Title {} /Producer (Sitcom Studio) >>",
+            info_string(title)
+        )
+        .as_bytes(),
+    );
 
     for (i, page) in pages.iter().enumerate() {
         let content_obj = 7 + 2 * i;
@@ -262,7 +295,8 @@ pub fn markdown_to_pdf(title: &str, markdown: &str) -> Vec<u8> {
                 pdf_string(&line.text)
             ));
         }
-        let mut body = format!("<< /Length {} >>\nstream\n{stream}endstream", stream.len()).into_bytes();
+        let mut body =
+            format!("<< /Length {} >>\nstream\n{stream}endstream", stream.len()).into_bytes();
         body.shrink_to_fit();
         push_obj(&mut out, &mut offsets, &body);
     }
@@ -274,8 +308,11 @@ pub fn markdown_to_pdf(title: &str, markdown: &str) -> Vec<u8> {
         out.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
     }
     out.extend_from_slice(
-        format!("trailer\n<< /Size {} /Root 1 0 R /Info 5 0 R >>\nstartxref\n{xref_at}\n%%EOF\n", total_objs + 1)
-            .as_bytes(),
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R /Info 5 0 R >>\nstartxref\n{xref_at}\n%%EOF\n",
+            total_objs + 1
+        )
+        .as_bytes(),
     );
     out
 }
@@ -289,7 +326,10 @@ mod tests {
     }
 
     fn find_last(hay: &[u8], needle: &[u8]) -> usize {
-        (0..=hay.len() - needle.len()).rev().find(|&i| &hay[i..i + needle.len()] == needle).unwrap()
+        (0..=hay.len() - needle.len())
+            .rev()
+            .find(|&i| &hay[i..i + needle.len()] == needle)
+            .unwrap()
     }
 
     #[test]
@@ -298,25 +338,54 @@ mod tests {
         assert!(pdf.starts_with(b"%PDF-1.4") && pdf.ends_with(b"%%EOF\n"));
         // On travaille sur les octets : l'en-tête contient des octets > 127.
         let k = find_last(&pdf, b"startxref\n") + b"startxref\n".len();
-        let start: usize = std::str::from_utf8(&pdf[k..]).unwrap().lines().next().unwrap().parse().unwrap();
+        let start: usize = std::str::from_utf8(&pdf[k..])
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
         assert!(pdf[start..].starts_with(b"xref\n"));
         let tail = std::str::from_utf8(&pdf[start..]).unwrap();
-        let entries: Vec<&str> = tail.lines().skip(3).take_while(|l| l.ends_with(" n ")).collect();
+        let entries: Vec<&str> = tail
+            .lines()
+            .skip(3)
+            .take_while(|l| l.ends_with(" n "))
+            .collect();
         assert_eq!(entries.len(), 7); // catalogue, pages, 2 polices, infos, page, contenu
         for (i, e) in entries.iter().enumerate() {
             let off: usize = e[..10].parse().unwrap();
-            assert!(pdf[off..].starts_with(format!("{} 0 obj", i + 1).as_bytes()), "objet {} mal placé", i + 1);
+            assert!(
+                pdf[off..].starts_with(format!("{} 0 obj", i + 1).as_bytes()),
+                "objet {} mal placé",
+                i + 1
+            );
         }
     }
 
     #[test]
     fn long_text_makes_several_pages_and_lines_fit() {
-        let md = (0..400).map(|i| format!("Ligne numéro {i} avec assez de mots pour tenir sur la page.")).collect::<Vec<_>>().join("\n");
+        let md = (0..400)
+            .map(|i| format!("Ligne numéro {i} avec assez de mots pour tenir sur la page."))
+            .collect::<Vec<_>>()
+            .join("\n");
         let t = as_text(&markdown_to_pdf("Long", &md));
-        let count: usize = t.split("/Count ").nth(1).unwrap().split(' ').next().unwrap().parse().unwrap();
+        let count: usize = t
+            .split("/Count ")
+            .nth(1)
+            .unwrap()
+            .split(' ')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
         assert!(count > 1);
         for l in layout("Long", &md) {
-            assert!(text_width(&l.text, l.size, l.bold) <= PAGE_W - 2.0 * MARGIN_X + 0.01, "{}", l.text);
+            assert!(
+                text_width(&l.text, l.size, l.bold) <= PAGE_W - 2.0 * MARGIN_X + 0.01,
+                "{}",
+                l.text
+            );
         }
     }
 
@@ -341,7 +410,10 @@ mod tests {
 
     #[test]
     fn info_title_uses_a_safe_subset() {
-        assert_eq!(info_string("Ma sitcom — bible é"), "(Ma sitcom - bible \\351)");
+        assert_eq!(
+            info_string("Ma sitcom — bible é"),
+            "(Ma sitcom - bible \\351)"
+        );
     }
 
     #[test]

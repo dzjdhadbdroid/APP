@@ -28,11 +28,19 @@ struct Loaded {
 fn load_facts(conn: &Connection) -> DbResult<Loaded> {
     let nodes = conn
         .prepare("SELECT id, title, kind FROM nodes")?
-        .query_map([], |r| Ok(NodeFact { id: r.get(0)?, title: r.get(1)?, kind: r.get(2)? }))?
+        .query_map([], |r| {
+            Ok(NodeFact {
+                id: r.get(0)?,
+                title: r.get(1)?,
+                kind: r.get(2)?,
+            })
+        })?
         .collect::<Result<Vec<_>, _>>()?;
     let event_dates = conn
         .prepare("SELECT id, story_sort FROM events")?
-        .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?)))?
+        .query_map([], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?))
+        })?
         .collect::<Result<HashMap<_, _>, _>>()?;
     let air_order = conn
         .prepare("SELECT id, air_order FROM episodes WHERE air_order IS NOT NULL")?
@@ -45,16 +53,32 @@ fn load_facts(conn: &Connection) -> DbResult<Loaded> {
     let links = conn
         .prepare("SELECT src_id, dst_id, link_type, label FROM links")?
         .query_map([], |r| {
-            Ok(LinkFact { src: r.get(0)?, dst: r.get(1)?, link_type: r.get(2)?, label: r.get(3)? })
+            Ok(LinkFact {
+                src: r.get(0)?,
+                dst: r.get(1)?,
+                link_type: r.get(2)?,
+                label: r.get(3)?,
+            })
         })?
         .collect::<Result<Vec<_>, _>>()?;
     let knowledge = conn
         .prepare("SELECT character_id, subject_id, learned_event_id FROM knowledge")?
         .query_map([], |r| {
-            Ok(KnowledgeFact { character: r.get(0)?, subject: r.get(1)?, learned_event: r.get(2)? })
+            Ok(KnowledgeFact {
+                character: r.get(0)?,
+                subject: r.get(1)?,
+                learned_event: r.get(2)?,
+            })
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(Loaded { nodes, event_dates, air_order, place_parent, links, knowledge })
+    Ok(Loaded {
+        nodes,
+        event_dates,
+        air_order,
+        place_parent,
+        links,
+        knowledge,
+    })
 }
 
 /// Recalcule les alertes : les nouvelles sont ajoutées, celles qui ne s'appliquent plus
@@ -123,7 +147,10 @@ pub fn set_status(conn: &Connection, id: i64, status: &str) -> DbResult<()> {
     if !["open", "ignored", "resolved"].contains(&status) {
         return Err(DbError::Invalid(format!("statut « {status} »")));
     }
-    conn.execute("UPDATE alerts SET status = ?2 WHERE id = ?1", params![id, status])?;
+    conn.execute(
+        "UPDATE alerts SET status = ?2 WHERE id = ?1",
+        params![id, status],
+    )?;
     Ok(())
 }
 

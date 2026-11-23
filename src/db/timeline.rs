@@ -67,7 +67,9 @@ pub fn set_event(
         None
     } else {
         Some(story_date::sort_key(start).ok_or_else(|| {
-            DbError::Invalid(format!("date « {start} » (formats : AAAA, AAAA-MM, AAAA-MM-JJ)"))
+            DbError::Invalid(format!(
+                "date « {start} » (formats : AAAA, AAAA-MM, AAAA-MM-JJ)"
+            ))
         })?)
     };
     if !STATUSES.contains(&status) {
@@ -76,7 +78,13 @@ pub fn set_event(
     let n = conn.execute(
         "UPDATE events SET story_start = ?2, story_sort = ?3, importance = ?4, status = ?5
          WHERE id = ?1",
-        params![id, (!start.is_empty()).then_some(start), sort, importance.clamp(1, 5), status],
+        params![
+            id,
+            (!start.is_empty()).then_some(start),
+            sort,
+            importance.clamp(1, 5),
+            status
+        ],
     )?;
     if n == 0 {
         return Err(DbError::NotFound(id));
@@ -122,9 +130,11 @@ pub fn in_period(rows: Vec<EventRow>, from: &str, to: &str) -> DbResult<Vec<Even
         if s.trim().is_empty() {
             return Ok(None);
         }
-        story_date::sort_key(s)
-            .map(Some)
-            .ok_or_else(|| DbError::Invalid(format!("date « {s} » (formats : AAAA, AAAA-MM, AAAA-MM-JJ)")))
+        story_date::sort_key(s).map(Some).ok_or_else(|| {
+            DbError::Invalid(format!(
+                "date « {s} » (formats : AAAA, AAAA-MM, AAAA-MM-JJ)"
+            ))
+        })
     };
     let (lo, hi) = (parse(from)?, parse(to)?);
     if lo.is_none() && hi.is_none() {
@@ -181,8 +191,14 @@ pub fn swap_air_order(conn: &Connection, a: i64, b: i64) -> DbResult<()> {
         .ok_or_else(|| DbError::Invalid("épisode sans ordre de diffusion".into()))
     };
     let (oa, ob) = (get(a)?, get(b)?);
-    tx.execute("UPDATE episodes SET air_order = ?2 WHERE id = ?1", params![a, ob])?;
-    tx.execute("UPDATE episodes SET air_order = ?2 WHERE id = ?1", params![b, oa])?;
+    tx.execute(
+        "UPDATE episodes SET air_order = ?2 WHERE id = ?1",
+        params![a, ob],
+    )?;
+    tx.execute(
+        "UPDATE episodes SET air_order = ?2 WHERE id = ?1",
+        params![b, oa],
+    )?;
     tx.commit()?;
     Ok(())
 }
@@ -229,7 +245,11 @@ mod tests {
         let early = nodes::create(&conn, NodeKind::Event, "tôt").unwrap();
         set_event(&conn, late, "2001-05", 3, "planned").unwrap();
         set_event(&conn, early, "1998-06-12", 5, "confirmed").unwrap();
-        let titles: Vec<_> = list_events(&conn, None).unwrap().into_iter().map(|e| e.title).collect();
+        let titles: Vec<_> = list_events(&conn, None)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.title)
+            .collect();
         assert_eq!(titles, ["tôt", "tard", "sans date"]);
         let _ = none;
     }
@@ -261,7 +281,11 @@ mod tests {
         let e2 = nodes::create_episode(&conn, "E2", 1, 2).unwrap();
         nodes::create_scene(&conn, e1, "s1", 1).unwrap();
         swap_air_order(&conn, e1, e2).unwrap();
-        let air: Vec<_> = list_air(&conn).unwrap().into_iter().map(|r| r.title).collect();
+        let air: Vec<_> = list_air(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|r| r.title)
+            .collect();
         assert_eq!(air, ["E2", "E1"]);
         assert_eq!(list_scenes(&conn).unwrap().len(), 1);
     }
@@ -279,8 +303,16 @@ mod tests {
         links::create(&conn, a, ep1, "mentions", None, None).unwrap();
         links::create(&conn, ep2, b, "involves", None, None).unwrap();
         assert_eq!(seasons(&conn).unwrap(), vec![1, 2]);
-        let s1: Vec<_> = events_of_season(&conn, 1).unwrap().into_iter().map(|e| e.title).collect();
-        let s2: Vec<_> = events_of_season(&conn, 2).unwrap().into_iter().map(|e| e.title).collect();
+        let s1: Vec<_> = events_of_season(&conn, 1)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.title)
+            .collect();
+        let s2: Vec<_> = events_of_season(&conn, 2)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.title)
+            .collect();
         assert_eq!((s1, s2), (vec!["a".to_string()], vec!["b".to_string()]));
         let all = list_events(&conn, None).unwrap();
         assert_eq!(all.len(), 3);

@@ -34,7 +34,11 @@ pub fn save_node(
 ) -> DbResult<()> {
     let node = nodes::get(conn, id)?;
     let old_fields = fields::load(conn, node.kind, id)?;
-    if node.title == title && node.summary == summary && node.notes == notes && old_fields == new_fields {
+    if node.title == title
+        && node.summary == summary
+        && node.notes == notes
+        && old_fields == new_fields
+    {
         return Ok(());
     }
     let snapshot = serde_json::to_string(&Snapshot {
@@ -64,7 +68,11 @@ pub fn save_node(
 pub fn append_note(conn: &Connection, id: i64, addition: &str) -> DbResult<()> {
     let n = nodes::get(conn, id)?;
     let f = fields::load(conn, n.kind, id)?;
-    let notes = if n.notes.is_empty() { addition.to_string() } else { format!("{}\n\n{addition}", n.notes) };
+    let notes = if n.notes.is_empty() {
+        addition.to_string()
+    } else {
+        format!("{}\n\n{addition}", n.notes)
+    };
     save_node(conn, id, &n.title, &n.summary, &notes, &f)
 }
 
@@ -75,7 +83,11 @@ pub fn list(conn: &Connection, node_id: i64) -> DbResult<Vec<VersionRow>> {
          FROM node_history WHERE node_id = ?1 ORDER BY id DESC",
     )?;
     let rows = stmt.query_map([node_id], |r| {
-        Ok(VersionRow { id: r.get(0)?, saved_at: r.get(1)?, title: r.get(2)? })
+        Ok(VersionRow {
+            id: r.get(0)?,
+            saved_at: r.get(1)?,
+            title: r.get(2)?,
+        })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
@@ -93,10 +105,18 @@ pub fn restore(conn: &Connection, version_id: i64) -> DbResult<i64> {
             rusqlite::Error::QueryReturnedNoRows => DbError::NotFound(version_id),
             other => other.into(),
         })?;
-    let mut snap: Snapshot = serde_json::from_str(&json).map_err(|e| DbError::Invalid(e.to_string()))?;
+    let mut snap: Snapshot =
+        serde_json::from_str(&json).map_err(|e| DbError::Invalid(e.to_string()))?;
     let kind = nodes::get(conn, node_id)?.kind;
     snap.fields.resize(fields::defs(kind).len(), String::new()); // le schéma a pu évoluer
-    save_node(conn, node_id, &snap.title, &snap.summary, &snap.notes, &snap.fields)?;
+    save_node(
+        conn,
+        node_id,
+        &snap.title,
+        &snap.summary,
+        &snap.notes,
+        &snap.fields,
+    )?;
     Ok(node_id)
 }
 
@@ -137,7 +157,10 @@ mod tests {
         let f = fields::load(&conn, NodeKind::Plot, id).unwrap();
         save_node(&conn, id, "Intrigue", "", "note existante", &f).unwrap();
         append_note(&conn, id, "[IA] idée").unwrap();
-        assert_eq!(nodes::get(&conn, id).unwrap().notes, "note existante\n\n[IA] idée");
+        assert_eq!(
+            nodes::get(&conn, id).unwrap().notes,
+            "note existante\n\n[IA] idée"
+        );
         assert_eq!(list(&conn, id).unwrap().len(), 2);
     }
 

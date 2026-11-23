@@ -48,7 +48,11 @@ impl StudioApp {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new(label).strong().color(color));
                     let text = RichText::new(&a.message);
-                    ui.label(if ignored { text.weak().strikethrough() } else { text });
+                    ui.label(if ignored {
+                        text.weak().strikethrough()
+                    } else {
+                        text
+                    });
                     if let Some(n) = a.node_id {
                         if ui.small_button("Ouvrir").clicked() {
                             open = Some(n);

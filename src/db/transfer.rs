@@ -134,7 +134,13 @@ pub struct ImportReport {
 /// Texte, résumé, notes et champs détaillés d'un nœud importé. Les valeurs de listes
 /// de choix invalides sont ignorées (la valeur par défaut est conservée).
 fn fill(conn: &Connection, kind: NodeKind, id: i64, v: &Value) -> DbResult<()> {
-    nodes::update_text(conn, id, &text(v, "title"), &text(v, "summary"), &text(v, "notes"))?;
+    nodes::update_text(
+        conn,
+        id,
+        &text(v, "title"),
+        &text(v, "summary"),
+        &text(v, "notes"),
+    )?;
     let defs = fields::defs(kind);
     if defs.is_empty() {
         return Ok(());
@@ -165,14 +171,20 @@ pub fn import_json(conn: &Connection, source: &str) -> DbResult<ImportReport> {
 
     let tx = Atomic::begin(conn)?;
     let mut map: HashMap<i64, i64> = HashMap::new();
-    let mut report = ImportReport { nodes: 0, links: 0, knowledge: 0 };
+    let mut report = ImportReport {
+        nodes: 0,
+        links: 0,
+        knowledge: 0,
+    };
 
     // Tout sauf les scènes ; les épisodes d'abord, dans leur ordre de diffusion d'origine.
     let mut first: Vec<&Value> = nodes_in.iter().filter(|n| n["kind"] != "scene").collect();
     first.sort_by_key(|n| n["extra"]["air_order"].as_i64().unwrap_or(i64::MAX));
 
     for v in first {
-        let old = v["id"].as_i64().ok_or_else(|| invalid("nœud sans identifiant"))?;
+        let old = v["id"]
+            .as_i64()
+            .ok_or_else(|| invalid("nœud sans identifiant"))?;
         let kind = NodeKind::parse(v["kind"].as_str().unwrap_or_default())?;
         let title = text(v, "title");
         let new = match kind {
@@ -180,11 +192,13 @@ pub fn import_json(conn: &Connection, source: &str) -> DbResult<ImportReport> {
                 let season = v["extra"]["season"].as_i64().unwrap_or(1);
                 let wanted = v["extra"]["number"].as_i64();
                 let taken = match wanted {
-                    Some(n) => tx.query_row(
-                        "SELECT COUNT(*) FROM episodes WHERE season = ?1 AND number = ?2",
-                        params![season, n],
-                        |r| r.get::<_, i64>(0),
-                    )? > 0,
+                    Some(n) => {
+                        tx.query_row(
+                            "SELECT COUNT(*) FROM episodes WHERE season = ?1 AND number = ?2",
+                            params![season, n],
+                            |r| r.get::<_, i64>(0),
+                        )? > 0
+                    }
                     None => true,
                 };
                 let number = match wanted {
@@ -214,7 +228,9 @@ pub fn import_json(conn: &Connection, source: &str) -> DbResult<ImportReport> {
     let mut scenes: Vec<&Value> = nodes_in.iter().filter(|n| n["kind"] == "scene").collect();
     scenes.sort_by_key(|n| n["extra"]["position"].as_i64().unwrap_or(0));
     for v in scenes {
-        let old = v["id"].as_i64().ok_or_else(|| invalid("scène sans identifiant"))?;
+        let old = v["id"]
+            .as_i64()
+            .ok_or_else(|| invalid("scène sans identifiant"))?;
         let Some(&episode) = v["extra"]["episode_id"].as_i64().and_then(|o| map.get(&o)) else {
             continue; // épisode absent du fichier
         };
@@ -224,7 +240,8 @@ pub fn import_json(conn: &Connection, source: &str) -> DbResult<ImportReport> {
         let e = &v["extra"];
         script::set_structure(&tx, new, e["act"].as_i64(), e["sequence"].as_i64())?;
         for b in e["blocks"].as_array().unwrap_or(&empty) {
-            let ty = BlockType::parse(b["type"].as_str().unwrap_or("action")).unwrap_or(BlockType::Action);
+            let ty = BlockType::parse(b["type"].as_str().unwrap_or("action"))
+                .unwrap_or(BlockType::Action);
             let speaker = b["character"].as_i64().and_then(|o| map.get(&o)).copied();
             script::add(&tx, new, ty, speaker, &text(b, "text"))?;
         }
@@ -241,7 +258,14 @@ pub fn import_json(conn: &Connection, source: &str) -> DbResult<ImportReport> {
             continue;
         };
         let ty = l["type"].as_str().unwrap_or("relation");
-        match links::create(&tx, *a, *b, ty, l["label"].as_str(), l["closeness"].as_i64()) {
+        match links::create(
+            &tx,
+            *a,
+            *b,
+            ty,
+            l["label"].as_str(),
+            l["closeness"].as_i64(),
+        ) {
             Ok(_) => report.links += 1,
             Err(DbError::Sqlite(_)) => {}
             Err(e) => return Err(e),
@@ -254,7 +278,10 @@ pub fn import_json(conn: &Connection, source: &str) -> DbResult<ImportReport> {
         ) else {
             continue;
         };
-        let event = k["learned_event"].as_i64().and_then(|o| map.get(&o)).copied();
+        let event = k["learned_event"]
+            .as_i64()
+            .and_then(|o| map.get(&o))
+            .copied();
         match knowledge::add(&tx, *c, *s, event) {
             Ok(_) => report.knowledge += 1,
             Err(DbError::Sqlite(_)) => {}
@@ -271,15 +298,22 @@ pub fn import_json(conn: &Connection, source: &str) -> DbResult<ImportReport> {
 /// « Bible de série » lisible : une section par type, une fiche par élément.
 pub fn export_markdown(conn: &Connection) -> DbResult<String> {
     let all_links = links::all(conn)?;
-    let titles: HashMap<i64, String> =
-        nodes::all(conn)?.into_iter().map(|n| (n.id, n.title)).collect();
-    let events: HashMap<i64, timeline::EventRow> =
-        timeline::list_events(conn, None)?.into_iter().map(|e| (e.id, e)).collect();
+    let titles: HashMap<i64, String> = nodes::all(conn)?
+        .into_iter()
+        .map(|n| (n.id, n.title))
+        .collect();
+    let events: HashMap<i64, timeline::EventRow> = timeline::list_events(conn, None)?
+        .into_iter()
+        .map(|e| (e.id, e))
+        .collect();
 
     let scenes = timeline::list_scenes(conn)?;
-    let scene_order: HashMap<i64, usize> = scenes.iter().enumerate().map(|(i, s)| (s.id, i)).collect();
-    let scene_info: HashMap<i64, (String, i64)> =
-        scenes.iter().map(|s| (s.id, (s.episode_title.clone(), s.position))).collect();
+    let scene_order: HashMap<i64, usize> =
+        scenes.iter().enumerate().map(|(i, s)| (s.id, i)).collect();
+    let scene_info: HashMap<i64, (String, i64)> = scenes
+        .iter()
+        .map(|s| (s.id, (s.episode_title.clone(), s.position)))
+        .collect();
 
     let mut out = String::from("# Bible de la sitcom\n");
     for kind in [
@@ -301,9 +335,10 @@ pub fn export_markdown(conn: &Connection) -> DbResult<String> {
         out.push_str(&format!("\n## {}\n", kind.label_plural()));
         for n in list {
             match scene_info.get(&n.id) {
-                Some((episode, position)) => {
-                    out.push_str(&format!("\n### {episode} · scène {position} · {}\n", n.title))
-                }
+                Some((episode, position)) => out.push_str(&format!(
+                    "\n### {episode} · scène {position} · {}\n",
+                    n.title
+                )),
                 None => out.push_str(&format!("\n### {}\n", n.title)),
             }
             if let Some(e) = events.get(&n.id) {
@@ -317,7 +352,10 @@ pub fn export_markdown(conn: &Connection) -> DbResult<String> {
             if !n.summary.is_empty() {
                 out.push_str(&format!("\n{}\n", n.summary));
             }
-            for (d, v) in fields::defs(kind).iter().zip(fields::load(conn, kind, n.id)?) {
+            for (d, v) in fields::defs(kind)
+                .iter()
+                .zip(fields::load(conn, kind, n.id)?)
+            {
                 if v.is_empty() {
                     continue;
                 }
@@ -333,8 +371,12 @@ pub fn export_markdown(conn: &Connection) -> DbResult<String> {
             if kind == NodeKind::Scene {
                 let (act, sequence) = script::structure(conn, n.id)?;
                 if act.is_some() || sequence.is_some() {
-                    let part = |label: &str, v: Option<i64>| v.map(|v| format!("**{label}** : {v}"));
-                    let both: Vec<String> = [part("Acte", act), part("Séquence", sequence)].into_iter().flatten().collect();
+                    let part =
+                        |label: &str, v: Option<i64>| v.map(|v| format!("**{label}** : {v}"));
+                    let both: Vec<String> = [part("Acte", act), part("Séquence", sequence)]
+                        .into_iter()
+                        .flatten()
+                        .collect();
                     out.push_str(&format!("\n{}\n", both.join(" · ")));
                 }
                 for b in script::list(conn, n.id)? {
@@ -348,8 +390,11 @@ pub fn export_markdown(conn: &Connection) -> DbResult<String> {
                 .iter()
                 .filter(|l| l.src_id == n.id || l.dst_id == n.id)
                 .map(|l| {
-                    let (arrow, other) =
-                        if l.src_id == n.id { ("→", l.dst_id) } else { ("←", l.src_id) };
+                    let (arrow, other) = if l.src_id == n.id {
+                        ("→", l.dst_id)
+                    } else {
+                        ("←", l.src_id)
+                    };
                     let what = l.label.clone().unwrap_or_else(|| l.link_type.clone());
                     let name = titles.get(&other).map_or("?", String::as_str);
                     format!("- {arrow} {what} : {name}")
@@ -378,7 +423,13 @@ mod tests {
         let mut f = fields::load(conn, NodeKind::Character, alice).unwrap();
         f[0] = "Alicia".into();
         fields::save(conn, NodeKind::Character, alice, &f).unwrap();
-        fields::save(conn, NodeKind::Scene, scene, &["ALICE : Salut !".to_string()]).unwrap();
+        fields::save(
+            conn,
+            NodeKind::Scene,
+            scene,
+            &["ALICE : Salut !".to_string()],
+        )
+        .unwrap();
         timeline::set_event(conn, ev, "1998-06-12", 5, "confirmed").unwrap();
         links::create(conn, alice, bob, "relation", Some("frère"), Some(8)).unwrap();
         links::create(conn, ev, alice, "involves", None, None).unwrap();
@@ -393,16 +444,30 @@ mod tests {
 
         let b = open_in_memory().unwrap();
         let report = import_json(&b, &json).unwrap();
-        assert_eq!(report, ImportReport { nodes: 5, links: 2, knowledge: 1 });
+        assert_eq!(
+            report,
+            ImportReport {
+                nodes: 5,
+                links: 2,
+                knowledge: 1
+            }
+        );
 
-        let alice = nodes::search_text(&b, "Alice").unwrap().into_iter().find(|n| n.title == "Alice").unwrap();
-        assert_eq!(fields::load(&b, NodeKind::Character, alice.id).unwrap()[0], "Alicia");
+        let alice = nodes::search_text(&b, "Alice")
+            .unwrap()
+            .into_iter()
+            .find(|n| n.title == "Alice")
+            .unwrap();
+        assert_eq!(
+            fields::load(&b, NodeKind::Character, alice.id).unwrap()[0],
+            "Alicia"
+        );
         let ev = timeline::list_events(&b, None).unwrap();
         assert_eq!(ev[0].story_start.as_deref(), Some("1998-06-12"));
         assert_eq!((ev[0].importance, ev[0].status.as_str()), (5, "confirmed"));
         assert_eq!(timeline::list_scenes(&b).unwrap().len(), 1);
         assert_eq!(nodes::search_text(&b, "Salut").unwrap().len(), 1); // dialogue retrouvé
-        // un export de la copie contient autant d'éléments que l'original
+                                                                       // un export de la copie contient autant d'éléments que l'original
         let again: Value = serde_json::from_str(&export_json(&b).unwrap()).unwrap();
         assert_eq!(again["nodes"].as_array().unwrap().len(), 5);
     }
@@ -421,7 +486,10 @@ mod tests {
         let b = open_in_memory().unwrap();
         import_json(&b, &export_json(&a).unwrap()).unwrap();
         let new_scene = timeline::list_scenes(&b).unwrap()[0].id;
-        assert_eq!(script::structure(&b, new_scene).unwrap(), (Some(2), Some(3)));
+        assert_eq!(
+            script::structure(&b, new_scene).unwrap(),
+            (Some(2), Some(3))
+        );
         let blocks = script::list(&b, new_scene).unwrap();
         assert_eq!(blocks.len(), 3);
         assert_eq!(blocks[1].character_title.as_deref(), Some("Alice")); // locuteur remappé
