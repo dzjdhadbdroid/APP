@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use eframe::egui::{self, Color32, RichText};
 
-use super::{title_in, StudioApp};
+use super::{title_in, Confirm, StudioApp};
 use crate::db::{
     links,
     nodes::{self, NodeKind},
@@ -65,6 +65,7 @@ impl StudioApp {
     fn episode_script(&mut self, ui: &mut egui::Ui, episode: i64) {
         let scenes = script::scenes_of(&self.conn, episode).unwrap_or_default();
         let (mut swap, mut open, mut add_scene) = (None, None, false);
+        let mut del_scene: Option<i64> = None;
         ui.label(
             RichText::new("Ordre de présentation des scènes de l'épisode. Ouvre une scène pour écrire son scénario.")
                 .color(Color32::from_gray(135)),
@@ -97,6 +98,13 @@ impl StudioApp {
                         if i + 1 < scenes.len() && ui.small_button("▼").clicked() {
                             swap = Some((s.id, scenes[i + 1].id));
                         }
+                        if ui
+                            .small_button("✕")
+                            .on_hover_text("Supprimer la scène")
+                            .clicked()
+                        {
+                            del_scene = Some(s.id);
+                        }
                     });
                 }
                 ui.add_space(8.0);
@@ -125,6 +133,9 @@ impl StudioApp {
                 Ok(scene)
             });
         }
+        if let Some(id) = del_scene {
+            self.confirm_delete = Some(Confirm::Node(id));
+        }
         if let Some(id) = open {
             self.go_to(id);
         }
@@ -148,6 +159,7 @@ impl StudioApp {
 
         ui.label(RichText::new(title_in(&self.nodes, scene)).strong());
         let mut apply_structure = false;
+        let mut delete_scene = false;
         if let Some((_, act, seq)) = self.script.structure.as_mut() {
             ui.horizontal(|ui| {
                 ui.add(egui::DragValue::new(act).range(0..=99).prefix("Acte "));
@@ -156,7 +168,13 @@ impl StudioApp {
                     apply_structure = true;
                 }
                 ui.label(RichText::new("0 = non renseigné").color(Color32::from_gray(135)));
+                if ui.button("Supprimer la scène").clicked() {
+                    delete_scene = true;
+                }
             });
+        }
+        if delete_scene {
+            self.confirm_delete = Some(Confirm::Node(scene));
         }
         ui.separator();
 

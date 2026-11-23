@@ -14,7 +14,7 @@ use super::{
     knowledge, links,
     nodes::{self, NodeKind},
     script::{self, BlockType},
-    timeline, Atomic, DbError, DbResult,
+    tags, timeline, Atomic, DbError, DbResult,
 };
 
 const FORMAT: &str = "sitcom-studio";
@@ -87,6 +87,7 @@ pub fn export_json(conn: &Connection) -> DbResult<String> {
             "summary": n.summary,
             "notes": n.notes,
             "fields": f,
+            "tags": tags::for_node(conn, n.id)?.into_iter().map(|(_, t)| t).collect::<Vec<_>>(),
             "extra": extra,
         }));
     }
@@ -160,6 +161,19 @@ fn fill(conn: &Connection, kind: NodeKind, id: i64, v: &Value) -> DbResult<()> {
     fields::save(conn, kind, id, &values)
 }
 
+/// Étiquettes d'un nœud importé ; une étiquette invalide est ignorée.
+fn import_tags(conn: &Connection, id: i64, v: &Value) -> DbResult<()> {
+    let none = Vec::new();
+    for t in v["tags"].as_array().unwrap_or(&none) {
+        if let Some(name) = t.as_str() {
+            if tags::normalize(name).is_ok() {
+                tags::add(conn, id, name)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn import_json(conn: &Connection, source: &str) -> DbResult<ImportReport> {
     let doc: Value =
         serde_json::from_str(source).map_err(|e| invalid(format!("JSON illisible : {e}")))?;
@@ -210,6 +224,7 @@ pub fn import_json(conn: &Connection, source: &str) -> DbResult<ImportReport> {
             _ => nodes::create(&tx, kind, &title)?,
         };
         fill(&tx, kind, new, v)?;
+        import_tags(&tx, new, v)?;
         if kind == NodeKind::Event {
             let e = &v["extra"];
             timeline::set_event(
@@ -237,6 +252,7 @@ pub fn import_json(conn: &Connection, source: &str) -> DbResult<ImportReport> {
         let position = nodes::next_scene_position(&tx, episode)?;
         let new = nodes::create_scene(&tx, episode, &text(v, "title"), position)?;
         fill(&tx, NodeKind::Scene, new, v)?;
+        import_tags(&tx, new, v)?;
         let e = &v["extra"];
         script::set_structure(&tx, new, e["act"].as_i64(), e["sequence"].as_i64())?;
         for b in e["blocks"].as_array().unwrap_or(&empty) {
@@ -434,6 +450,7 @@ mod tests {
         links::create(conn, alice, bob, "relation", Some("frère"), Some(8)).unwrap();
         links::create(conn, ev, alice, "involves", None, None).unwrap();
         knowledge::add(conn, alice, bob, Some(ev)).unwrap();
+        tags::add(conn, alice, "famille").unwrap();
     }
 
     #[test]
@@ -462,6 +479,7 @@ mod tests {
             fields::load(&b, NodeKind::Character, alice.id).unwrap()[0],
             "Alicia"
         );
+        assert_eq!(tags::for_node(&b, alice.id).unwrap()[0].1, "famille");
         let ev = timeline::list_events(&b, None).unwrap();
         assert_eq!(ev[0].story_start.as_deref(), Some("1998-06-12"));
         assert_eq!((ev[0].importance, ev[0].status.as_str()), (5, "confirmed"));

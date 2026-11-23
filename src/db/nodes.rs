@@ -310,6 +310,31 @@ pub fn delete(conn: &Connection, id: i64) -> DbResult<()> {
     Ok(())
 }
 
+/// Supprime tous les épisodes d'une saison (et leurs scènes), en une seule opération.
+pub fn delete_season(conn: &Connection, season: i64) -> DbResult<usize> {
+    let ids: Vec<i64> = {
+        let mut stmt = conn.prepare("SELECT id FROM episodes WHERE season = ?1")?;
+        let rows = stmt.query_map([season], |r| r.get(0))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    let tx = Atomic::begin(conn)?;
+    for id in &ids {
+        delete(&tx, *id)?;
+    }
+    tx.commit()?;
+    Ok(ids.len())
+}
+
+/// Épisode d'une scène (None pour un autre type d'élément).
+pub fn episode_of_scene(conn: &Connection, scene: i64) -> Option<i64> {
+    conn.query_row(
+        "SELECT episode_id FROM scenes WHERE id = ?1",
+        [scene],
+        |r| r.get(0),
+    )
+    .ok()
+}
+
 pub fn list_by_kind(conn: &Connection, kind: NodeKind) -> DbResult<Vec<Node>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {COLS} FROM nodes WHERE kind = ?1 ORDER BY title COLLATE NOCASE"
@@ -402,5 +427,18 @@ mod tests {
         create(&conn, NodeKind::Object, "Clé orpheline").unwrap();
         assert_eq!(isolated(&conn).unwrap().len(), 1);
         assert_eq!(search(&conn, "orpheline").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn deleting_a_season_removes_its_episodes_and_scenes_only() {
+        let conn = crate::db::open_in_memory().unwrap();
+        let e1 = create_episode(&conn, "A", 1, 1).unwrap();
+        let e2 = create_episode(&conn, "B", 2, 1).unwrap();
+        let s1 = create_scene(&conn, e1, "s", 1).unwrap();
+        assert_eq!(episode_of_scene(&conn, s1), Some(e1));
+        assert_eq!(delete_season(&conn, 1).unwrap(), 1);
+        let left: Vec<_> = all(&conn).unwrap().into_iter().map(|n| n.id).collect();
+        assert_eq!(left, vec![e2]);
+        assert_eq!(delete_season(&conn, 9).unwrap(), 0);
     }
 }

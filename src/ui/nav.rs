@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use eframe::egui::{self, Color32, RichText};
 
-use super::{theme, StudioApp, View};
+use super::{theme, Confirm, StudioApp, View};
 use crate::db::{
     nodes::{self, NodeKind},
     timeline,
@@ -178,6 +178,7 @@ impl StudioApp {
         }
         let selected = self.selected;
         let (mut open_ep, mut new_ep, mut new_season, mut plots) = (None, None, false, false);
+        let mut del_season: Option<i64> = None;
         ui.label(
             RichText::new("SAISONS")
                 .small()
@@ -208,9 +209,14 @@ impl StudioApp {
                                 open_ep = Some(*id);
                             }
                         }
-                        if ui.small_button("+ Épisode").clicked() {
-                            new_ep = Some(*season);
-                        }
+                        ui.horizontal(|ui| {
+                            if ui.small_button("+ Épisode").clicked() {
+                                new_ep = Some(*season);
+                            }
+                            if ui.small_button("Supprimer la saison").clicked() {
+                                del_season = Some(*season);
+                            }
+                        });
                     });
                 }
                 ui.add_space(6.0);
@@ -248,6 +254,9 @@ impl StudioApp {
             self.refresh_search();
             self.select(id);
             self.remember_viewed(id);
+        }
+        if let Some(s) = del_season {
+            self.confirm_delete = Some(Confirm::Season(s));
         }
         if plots {
             self.switch_view(View::Kind(NodeKind::Plot));

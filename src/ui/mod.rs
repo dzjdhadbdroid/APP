@@ -27,7 +27,7 @@ use crate::db::{
     knowledge::{self, KnowledgeRow},
     links::{self, Link},
     nodes::{self, Node, NodeKind},
-    places, DbError, DbResult,
+    places, script, tags, timeline, DbError, DbResult,
 };
 
 pub use crate::db::links::{link_type_label, LINK_TYPES};
@@ -73,6 +73,13 @@ struct Edit {
     fields: Vec<String>,
 }
 
+/// Suppression en attente de confirmation.
+#[derive(Clone, Copy)]
+enum Confirm {
+    Node(i64),
+    Season(i64),
+}
+
 #[derive(Default)]
 struct KnowForm {
     subject: Option<i64>,
@@ -110,6 +117,9 @@ pub struct StudioApp {
     rel: relations_view::RelState,
     prefs: settings_view::Prefs,
     section_view: [View; 6],
+    confirm_delete: Option<Confirm>,
+    tag_input: String,
+    tag_filter: Option<i64>,
     char_secondary: bool,
     graph: graph_view::GraphState,
     timeline: timeline_view::TimelineState,
@@ -143,6 +153,9 @@ impl StudioApp {
             rel: relations_view::RelState::default(),
             prefs,
             section_view: nav::default_views(),
+            confirm_delete: None,
+            tag_input: String::new(),
+            tag_filter: None,
             char_secondary: false,
             graph: graph_view::GraphState::new(),
             timeline: timeline_view::TimelineState::default(),
@@ -232,6 +245,100 @@ impl StudioApp {
             self.refresh_search();
             self.select(id);
             self.remember_viewed(id);
+        }
+    }
+
+    /// Fenêtre de confirmation : une sauvegarde de sécurité est faite avant toute suppression.
+    fn delete_dialog(&mut self, ctx: &egui::Context) {
+        let Some(what) = self.confirm_delete else {
+            return;
+        };
+        let (title, detail) = match what {
+            Confirm::Node(id) => {
+                let n = self.nodes.iter().find(|n| n.id == id);
+                let name = n.map_or("(supprimé)".to_string(), |n| n.title.clone());
+                let kind = n.map_or("élément", |n| n.kind.label());
+                let nb_links = self
+                    .links
+                    .iter()
+                    .filter(|l| l.src_id == id || l.dst_id == id)
+                    .count();
+                let mut d = format!("{nb_links} connexion(s) seront supprimées.");
+                if n.is_some_and(|n| n.kind == NodeKind::Episode) {
+                    let scenes = script::scenes_of(&self.conn, id).map_or(0, |s| s.len());
+                    d.push_str(&format!(
+                        " Les {scenes} scène(s) de l'épisode seront supprimées aussi."
+                    ));
+                }
+                (format!("Supprimer {} « {name} » ?", kind.to_lowercase()), d)
+            }
+            Confirm::Season(s) => {
+                let count = timeline::list_air(&self.conn)
+                    .map_or(0, |v| v.iter().filter(|r| r.season == s).count());
+                (
+                    format!("Supprimer la saison {s} ?"),
+                    format!("{count} épisode(s) et toutes leurs scènes seront supprimés."),
+                )
+            }
+        };
+        let mut decision: Option<bool> = None;
+        egui::Window::new("Confirmer la suppression")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(RichText::new(title).strong());
+                ui.label(detail);
+                ui.label(
+                    RichText::new("Une sauvegarde de sécurité est créée avant (Paramètres → Données et sauvegardes).")
+                        .small()
+                        .color(theme::muted(ui)),
+                );
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Annuler").clicked() {
+                        decision = Some(false);
+                    }
+                    if ui
+                        .button(RichText::new("Supprimer définitivement").color(Color32::from_rgb(255, 110, 110)))
+                        .clicked()
+                    {
+                        decision = Some(true);
+                    }
+                });
+            });
+        match decision {
+            Some(false) => self.confirm_delete = None,
+            Some(true) => {
+                self.confirm_delete = None;
+                if let Err(e) =
+                    db::backup_with_prefix(&self.conn, &self.data_dir, "avant_suppression")
+                {
+                    self.status =
+                        format!("Sauvegarde de sécurité impossible, suppression annulée : {e}");
+                    return;
+                }
+                match what {
+                    Confirm::Node(id) => {
+                        let parent = nodes::episode_of_scene(&self.conn, id);
+                        if self.apply(|c| nodes::delete(c, id)).is_some() {
+                            self.edit = None;
+                            self.selected = None;
+                            self.tag_input.clear();
+                            if let Some(ep) = parent {
+                                self.select(ep);
+                            }
+                        }
+                    }
+                    Confirm::Season(s) => {
+                        if self.apply(|c| nodes::delete_season(c, s)).is_some() {
+                            self.edit = None;
+                            self.selected = None;
+                        }
+                    }
+                }
+            }
+            None => {}
         }
     }
 
@@ -431,12 +538,44 @@ impl StudioApp {
     }
 
     fn list_column(&mut self, ui: &mut egui::Ui, kind: NodeKind) {
+        let all_tags = tags::all(&self.conn).unwrap_or_default();
+        if self
+            .tag_filter
+            .is_some_and(|t| !all_tags.iter().any(|x| x.0 == t))
+        {
+            self.tag_filter = None;
+        }
+        if !all_tags.is_empty() {
+            ui.horizontal(|ui| {
+                ui.label("Étiquette :");
+                let shown = self
+                    .tag_filter
+                    .and_then(|t| all_tags.iter().find(|x| x.0 == t))
+                    .map_or("(toutes)".to_string(), |x| format!("#{}", x.1));
+                egui::ComboBox::from_id_salt("tag_filter")
+                    .selected_text(shown)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.tag_filter, None, "(toutes)");
+                        for (id, name, n) in &all_tags {
+                            ui.selectable_value(
+                                &mut self.tag_filter,
+                                Some(*id),
+                                format!("#{name} ({n})"),
+                            );
+                        }
+                    });
+            });
+        }
+        let tagged = self
+            .tag_filter
+            .map(|t| tags::node_ids(&self.conn, t).unwrap_or_default());
         let secondary_ids = nodes::secondary_ids(&self.conn).unwrap_or_default();
         let want_secondary = self.char_secondary;
         let items: Vec<(i64, String)> = self
             .nodes
             .iter()
             .filter(|n| n.kind == kind)
+            .filter(|n| tagged.as_ref().map_or(true, |s| s.contains(&n.id)))
             .filter(|n| {
                 kind != NodeKind::Character || secondary_ids.contains(&n.id) == want_secondary
             })
@@ -491,6 +630,10 @@ impl StudioApp {
         };
         let versions: Vec<VersionRow> = history::list(&self.conn, id).unwrap_or_default();
         let mut restore: Option<i64> = None;
+        let my_tags = tags::for_node(&self.conn, id).unwrap_or_default();
+        let all_tags = tags::all(&self.conn).unwrap_or_default();
+        let (mut add_tag, mut del_tag, mut add_existing): (bool, Option<i64>, Option<String>) =
+            (false, None, None);
         let know: Vec<KnowledgeRow> = if kind == Some(NodeKind::Character) {
             knowledge::for_character(&self.conn, id).unwrap_or_default()
         } else {
@@ -502,8 +645,35 @@ impl StudioApp {
             let nodes = &self.nodes;
             let all_links = &self.links;
             let form = &mut self.link_form;
+            let tag_input = &mut self.tag_input;
             egui::ScrollArea::vertical().id_salt("detail").show(ui, |ui| {
                 ui.add(egui::TextEdit::singleline(&mut edit.title).desired_width(f32::INFINITY));
+                ui.horizontal_wrapped(|ui| {
+                    for (tid, name) in &my_tags {
+                        ui.label(RichText::new(format!("#{name}")).color(theme::ACCENT));
+                        if ui.small_button("✕").on_hover_text("Retirer l'étiquette").clicked() {
+                            del_tag = Some(*tid);
+                        }
+                    }
+                    let r = ui.add(
+                        egui::TextEdit::singleline(tag_input).hint_text("+ étiquette").desired_width(130.0),
+                    );
+                    let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if enter || ui.small_button("Ajouter").clicked() {
+                        add_tag = true;
+                    }
+                    let free: Vec<&(i64, String, i64)> =
+                        all_tags.iter().filter(|t| !my_tags.iter().any(|m| m.0 == t.0)).collect();
+                    if !free.is_empty() {
+                        egui::ComboBox::from_id_salt("tag_existing").selected_text("Existantes…").show_ui(ui, |ui| {
+                            for t in free {
+                                if ui.selectable_label(false, format!("#{}", t.1)).clicked() {
+                                    add_existing = Some(t.1.clone());
+                                }
+                            }
+                        });
+                    }
+                });
                 ui.label("Résumé");
                 ui.add(
                     egui::TextEdit::multiline(&mut edit.summary)
@@ -758,9 +928,17 @@ impl StudioApp {
                 Ok(scene)
             });
         }
-        if delete && self.apply(|c| nodes::delete(c, id)).is_some() {
-            self.selected = None;
-            return;
+        if let Some(t) = del_tag {
+            self.apply(|c| tags::remove(c, id, t));
+        }
+        let new_tag = add_existing.or_else(|| add_tag.then(|| self.tag_input.clone()));
+        if let Some(name) = new_tag {
+            if self.apply(|c| tags::add(c, id, &name)).is_some() {
+                self.tag_input.clear();
+            }
+        }
+        if delete {
+            self.confirm_delete = Some(Confirm::Node(id));
         }
         self.edit = Some(edit);
         if to_ai {
@@ -776,6 +954,7 @@ impl StudioApp {
 impl eframe::App for StudioApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.prefs.apply(ctx);
+        self.delete_dialog(ctx);
         self.poll_ai(ctx);
         self.top_bar(ctx);
         if self.has_sub_nav() {
