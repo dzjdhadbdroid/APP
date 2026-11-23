@@ -32,10 +32,10 @@ pub fn for_node(conn: &Connection, node: i64) -> DbResult<Vec<(i64, String)>> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-/// Toutes les étiquettes utilisées, avec leur nombre d'éléments.
+/// Toutes les étiquettes utilisées (au moins un élément), avec leur nombre d'éléments.
 pub fn all(conn: &Connection) -> DbResult<Vec<(i64, String, i64)>> {
     let mut stmt = conn.prepare(
-        "SELECT t.id, t.name, COUNT(nt.node_id) FROM tags t LEFT JOIN node_tags nt ON nt.tag_id = t.id
+        "SELECT t.id, t.name, COUNT(nt.node_id) FROM tags t JOIN node_tags nt ON nt.tag_id = t.id
          GROUP BY t.id ORDER BY t.name COLLATE NOCASE",
     )?;
     let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;

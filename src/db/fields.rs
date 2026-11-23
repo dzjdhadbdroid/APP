@@ -216,6 +216,15 @@ pub fn rebuild_body(conn: &Connection, kind: NodeKind, id: i64) -> DbResult<()> 
             parts.push(row?);
         }
     }
+    // Les étiquettes sont indexées avec le reste du texte.
+    let mut stmt = conn.prepare(
+        "SELECT t.name FROM node_tags nt JOIN tags t ON t.id = nt.tag_id
+         WHERE nt.node_id = ?1 ORDER BY t.name",
+    )?;
+    let names = stmt.query_map([id], |r| r.get::<_, String>(0))?;
+    for name in names {
+        parts.push(format!("#{}", name?));
+    }
     conn.execute(
         "UPDATE nodes SET body = ?2 WHERE id = ?1",
         rusqlite::params![id, parts.join("\n")],
