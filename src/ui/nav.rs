@@ -35,7 +35,7 @@ pub fn section_of(view: View) -> Section {
         View::Dashboard | View::Graph | View::Alerts | View::Ai => Section::Dashboard,
         View::Relations => Section::Characters,
         View::Timeline => Section::Timeline,
-        View::Settings | View::Data => Section::Settings,
+        View::Settings | View::Data | View::Trash => Section::Settings,
         View::Kind(k) => match k {
             NodeKind::Character => Section::Characters,
             NodeKind::Place | NodeKind::Object => Section::Places,
@@ -285,6 +285,7 @@ impl StudioApp {
             Section::Settings => vec![
                 ("Affichage", View::Settings),
                 ("Données et sauvegardes", View::Data),
+                ("Corbeille", View::Trash),
             ],
             _ => return,
         };

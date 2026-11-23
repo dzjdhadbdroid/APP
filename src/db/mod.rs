@@ -14,6 +14,7 @@ pub mod settings;
 pub mod tags;
 pub mod timeline;
 pub mod transfer;
+pub mod trash;
 
 use std::path::Path;
 
@@ -70,6 +71,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (5, include_str!("../../migrations/0005_script.sql")),
     (6, include_str!("../../migrations/0006_character_role.sql")),
     (7, include_str!("../../migrations/0007_tags.sql")),
+    (8, include_str!("../../migrations/0008_trash.sql")),
 ];
 
 pub fn open(path: &Path) -> DbResult<Connection> {
@@ -253,7 +255,7 @@ mod tests {
         let v: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 7);
+        assert_eq!(v, 8);
     }
 
     #[test]
@@ -276,7 +278,7 @@ mod tests {
             conn.query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0))
                 .unwrap(),
         );
-        assert_eq!((v, n), (7, 1));
+        assert_eq!((v, n), (8, 1));
         conn.execute("UPDATE characters SET evolution = 'x' WHERE id = 1", [])
             .unwrap(); // colonne ajoutée
     }

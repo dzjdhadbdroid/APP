@@ -30,8 +30,19 @@ fn text(v: &Value, key: &str) -> String {
 // ───────────────────────── export JSON ─────────────────────────
 
 pub fn export_json(conn: &Connection) -> DbResult<String> {
+    export_filtered(conn, None)
+}
+
+/// Export complet, ou limité à certains éléments (et aux liens qui les touchent).
+pub fn export_filtered(
+    conn: &Connection,
+    only: Option<&std::collections::HashSet<i64>>,
+) -> DbResult<String> {
     let mut nodes_json = Vec::new();
     for n in nodes::all(conn)? {
+        if only.is_some_and(|s| !s.contains(&n.id)) {
+            continue;
+        }
         let defs = fields::defs(n.kind);
         let mut f = Map::new();
         for (d, v) in defs.iter().zip(fields::load(conn, n.kind, n.id)?) {
@@ -94,6 +105,7 @@ pub fn export_json(conn: &Connection) -> DbResult<String> {
 
     let links_json: Vec<Value> = links::all(conn)?
         .into_iter()
+        .filter(|l| only.map_or(true, |s| s.contains(&l.src_id) || s.contains(&l.dst_id)))
         .map(|l| {
             json!({
                 "src": l.src_id, "dst": l.dst_id, "type": l.link_type,
@@ -111,7 +123,16 @@ pub fn export_json(conn: &Connection) -> DbResult<String> {
                 "learned_event": r.get::<_, Option<i64>>(2)?,
             }))
         })?
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|k| {
+            only.map_or(true, |set| {
+                [&k["character"], &k["subject"]]
+                    .iter()
+                    .any(|v| v.as_i64().is_some_and(|i| set.contains(&i)))
+            })
+        })
+        .collect::<Vec<_>>();
 
     let doc = json!({
         "format": FORMAT,
@@ -175,6 +196,16 @@ fn import_tags(conn: &Connection, id: i64, v: &Value) -> DbResult<()> {
 }
 
 pub fn import_json(conn: &Connection, source: &str) -> DbResult<ImportReport> {
+    import_inner(conn, source, false)
+}
+
+/// Import d'un instantané de la corbeille : les liens vers des éléments qui existent
+/// encore (même identifiant) sont rétablis.
+pub fn import_restoring(conn: &Connection, source: &str) -> DbResult<ImportReport> {
+    import_inner(conn, source, true)
+}
+
+fn import_inner(conn: &Connection, source: &str, keep_external: bool) -> DbResult<ImportReport> {
     let doc: Value =
         serde_json::from_str(source).map_err(|e| invalid(format!("JSON illisible : {e}")))?;
     if doc["format"] != FORMAT {
@@ -266,22 +297,24 @@ pub fn import_json(conn: &Connection, source: &str) -> DbResult<ImportReport> {
     }
 
     // Liens et connaissances : un doublon ou une référence manquante est simplement ignoré.
+    let resolve = |old: Option<i64>| -> Option<i64> {
+        let old = old?;
+        map.get(&old).copied().or_else(|| {
+            let exists = tx
+                .query_row("SELECT COUNT(*) FROM nodes WHERE id = ?1", [old], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .unwrap_or(0)
+                > 0;
+            (keep_external && exists).then_some(old)
+        })
+    };
     for l in doc["links"].as_array().unwrap_or(&empty) {
-        let (Some(a), Some(b)) = (
-            l["src"].as_i64().and_then(|o| map.get(&o)),
-            l["dst"].as_i64().and_then(|o| map.get(&o)),
-        ) else {
+        let (Some(a), Some(b)) = (resolve(l["src"].as_i64()), resolve(l["dst"].as_i64())) else {
             continue;
         };
         let ty = l["type"].as_str().unwrap_or("relation");
-        match links::create(
-            &tx,
-            *a,
-            *b,
-            ty,
-            l["label"].as_str(),
-            l["closeness"].as_i64(),
-        ) {
+        match links::create(&tx, a, b, ty, l["label"].as_str(), l["closeness"].as_i64()) {
             Ok(_) => report.links += 1,
             Err(DbError::Sqlite(_)) => {}
             Err(e) => return Err(e),
@@ -289,16 +322,13 @@ pub fn import_json(conn: &Connection, source: &str) -> DbResult<ImportReport> {
     }
     for k in doc["knowledge"].as_array().unwrap_or(&empty) {
         let (Some(c), Some(s)) = (
-            k["character"].as_i64().and_then(|o| map.get(&o)),
-            k["subject"].as_i64().and_then(|o| map.get(&o)),
+            resolve(k["character"].as_i64()),
+            resolve(k["subject"].as_i64()),
         ) else {
             continue;
         };
-        let event = k["learned_event"]
-            .as_i64()
-            .and_then(|o| map.get(&o))
-            .copied();
-        match knowledge::add(&tx, *c, *s, event) {
+        let event = resolve(k["learned_event"].as_i64());
+        match knowledge::add(&tx, c, s, event) {
             Ok(_) => report.knowledge += 1,
             Err(DbError::Sqlite(_)) => {}
             Err(e) => return Err(e),

@@ -12,6 +12,7 @@ mod script_view;
 mod settings_view;
 mod theme;
 mod timeline_view;
+mod trash_view;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -62,6 +63,7 @@ enum View {
     Data,
     Ai,
     Settings,
+    Trash,
 }
 
 struct Edit {
@@ -322,7 +324,7 @@ impl StudioApp {
                 ui.label(RichText::new(title).strong());
                 ui.label(detail);
                 ui.label(
-                    RichText::new("Une sauvegarde de sécurité est créée avant (Paramètres → Données et sauvegardes).")
+                    RichText::new("L'élément est conservé dans Paramètres → Corbeille (restaurable), et une sauvegarde de sécurité est créée avant.")
                         .small()
                         .color(theme::muted(ui)),
                 );
@@ -353,6 +355,7 @@ impl StudioApp {
                 match what {
                     Confirm::Node(id) => {
                         let parent = nodes::episode_of_scene(&self.conn, id);
+                        let _ = db::trash::put(&self.conn, id);
                         if self.apply(|c| nodes::delete(c, id)).is_some() {
                             self.edit = None;
                             self.selected = None;
@@ -363,6 +366,15 @@ impl StudioApp {
                         }
                     }
                     Confirm::Season(s) => {
+                        let episodes: Vec<i64> = timeline::list_air(&self.conn)
+                            .unwrap_or_default()
+                            .into_iter()
+                            .filter(|r| r.season == s)
+                            .map(|r| r.id)
+                            .collect();
+                        for e in episodes {
+                            let _ = db::trash::put(&self.conn, e);
+                        }
                         if self.apply(|c| nodes::delete_season(c, s)).is_some() {
                             self.edit = None;
                             self.selected = None;
@@ -1021,6 +1033,7 @@ impl eframe::App for StudioApp {
                     View::Graph => self.graph_view(ui),
                     View::Alerts => self.alerts_view(ui),
                     View::Data => self.data_view(ui),
+                    View::Trash => self.trash_view(ui),
                     View::Ai => self.ai_view(ui),
                     View::Settings => self.settings_view(ui),
                 }
