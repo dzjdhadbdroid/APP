@@ -23,8 +23,17 @@ enum PdfState {
     Failed(String),
 }
 
+#[derive(Clone, Copy, PartialEq, Default)]
+enum Mode {
+    #[default]
+    Text,
+    Pages,
+}
+
 pub struct PdfView {
     docs: HashMap<i64, PdfState>,
+    texts: HashMap<i64, String>,
+    mode: Mode,
     pub selected: Option<i64>,
     width: f32,
 }
@@ -33,6 +42,8 @@ impl Default for PdfView {
     fn default() -> Self {
         Self {
             docs: HashMap::new(),
+            texts: HashMap::new(),
+            mode: Mode::Text,
             selected: None,
             width: 760.0,
         }
@@ -42,6 +53,7 @@ impl Default for PdfView {
 impl PdfView {
     pub fn forget(&mut self, attachment: i64) {
         self.docs.remove(&attachment);
+        self.texts.remove(&attachment);
         if self.selected == Some(attachment) {
             self.selected = None;
         }
@@ -67,6 +79,19 @@ impl StudioApp {
                     }
                 }
             });
+        }
+
+        ui.horizontal(|ui| {
+            if theme::tab(ui, self.pdf.mode == Mode::Text, "Texte") {
+                self.pdf.mode = Mode::Text;
+            }
+            if theme::tab(ui, self.pdf.mode == Mode::Pages, "Pages (aperçu fidèle)") {
+                self.pdf.mode = Mode::Pages;
+            }
+        });
+        if self.pdf.mode == Mode::Text {
+            self.pdf_text(ui, id, height);
+            return;
         }
 
         if !self.pdf.docs.contains_key(&id) {
@@ -168,5 +193,55 @@ impl StudioApp {
             }
             None => {}
         }
+    }
+
+    /// Texte extrait du PDF, sélectionnable et copiable.
+    fn pdf_text(&mut self, ui: &mut egui::Ui, id: i64, height: f32) {
+        if !self.pdf.texts.contains_key(&id) {
+            let text = attachments::text(&self.conn, id).unwrap_or_default();
+            self.pdf.texts.insert(id, text);
+        }
+        let empty = self.pdf.texts.get(&id).is_none_or(|t| t.trim().is_empty());
+        if empty {
+            ui.label(
+                RichText::new("Aucun texte enregistré pour ce PDF (PDF scanné, ou ajouté avant cette fonction).")
+                    .color(theme::muted(ui)),
+            );
+            if ui.button("Extraire le texte").clicked() {
+                let result = attachments::data(&self.conn, id)
+                    .map_err(|e| e.to_string())
+                    .and_then(|(_, bytes)| crate::pdf_render::extract_text(&self.data_dir, &bytes));
+                match result {
+                    Ok(t) if t.trim().is_empty() => {
+                        self.status = "Ce PDF ne contient pas de texte (document scanné ?).".into();
+                    }
+                    Ok(t) => {
+                        if self.apply(|c| attachments::set_text(c, id, &t)).is_some() {
+                            self.pdf.texts.insert(id, t);
+                        }
+                    }
+                    Err(e) => self.status = format!("Extraction impossible : {e}"),
+                }
+            }
+            return;
+        }
+        let text = self.pdf.texts.get(&id).cloned().unwrap_or_default();
+        ui.horizontal(|ui| {
+            if ui.button("Copier le texte").clicked() {
+                ui.ctx().copy_text(text.clone());
+            }
+            ui.label(
+                RichText::new(format!("{} mots", text.split_whitespace().count()))
+                    .small()
+                    .color(theme::muted(ui)),
+            );
+        });
+        egui::ScrollArea::vertical()
+            .id_salt(("pdf_text", id))
+            .max_height(height.max(200.0))
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.add(egui::Label::new(RichText::new(text).size(15.0)).selectable(true));
+            });
     }
 }
