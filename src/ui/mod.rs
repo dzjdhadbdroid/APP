@@ -8,6 +8,7 @@ mod attach_view;
 mod data_view;
 mod graph_view;
 mod nav;
+mod pdf_view;
 mod relations_view;
 mod script_view;
 mod settings_view;
@@ -122,6 +123,7 @@ pub struct StudioApp {
     section_view: [View; 6],
     confirm_delete: Option<Confirm>,
     focus: bool,
+    pdf: pdf_view::PdfView,
     synopsis_buf: (i64, String),
     attach_confirm: Option<i64>,
     gag_only: bool,
@@ -194,6 +196,7 @@ impl StudioApp {
             section_view: nav::default_views(),
             confirm_delete: None,
             focus: false,
+            pdf: pdf_view::PdfView::default(),
             synopsis_buf: (0, String::new()),
             attach_confirm: None,
             gag_only: false,

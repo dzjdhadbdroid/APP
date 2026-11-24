@@ -44,17 +44,28 @@ impl StudioApp {
                     .unwrap_or_default();
                 self.synopsis_buf = (id, text);
             }
-            ui.label(if kind == NodeKind::Episode {
-                "Synopsis"
+            let has_pdf =
+                attachments::list(&self.conn, id, "synopsis").is_ok_and(|v| !v.is_empty());
+            let title = if kind == NodeKind::Episode {
+                "Texte du synopsis"
             } else {
-                "Notes de scène"
-            });
-            ui.add(
-                egui::TextEdit::multiline(&mut self.synopsis_buf.1)
-                    .desired_rows(8)
-                    .desired_width(f32::INFINITY),
-            );
-            if ui.button("Enregistrer le texte").clicked() {
+                "Notes de la scène"
+            };
+            let mut save_text = false;
+            egui::CollapsingHeader::new(title)
+                .id_salt(("synopsis_text", id))
+                .default_open(!has_pdf)
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.synopsis_buf.1)
+                            .desired_rows(8)
+                            .desired_width(f32::INFINITY),
+                    );
+                    if ui.button("Enregistrer le texte").clicked() {
+                        save_text = true;
+                    }
+                });
+            if save_text {
                 if let Some(idx) = idx {
                     let text = self.synopsis_buf.1.clone();
                     self.apply(|c| {
@@ -66,7 +77,8 @@ impl StudioApp {
             }
             ui.separator();
         }
-        self.attachments_panel(ui, id, "synopsis", "PDF de synopsis");
+        let height = (ui.available_height() - 60.0).max(300.0);
+        self.attachments_panel(ui, id, "synopsis", "PDF de synopsis", height);
     }
 
     /// PDF de scénario déjà rédigés : section repliée tant qu'on n'en a pas besoin.
@@ -75,7 +87,9 @@ impl StudioApp {
         egui::CollapsingHeader::new(format!("PDF de scénario déjà rédigé ({n})"))
             .id_salt(("pdf_section", node))
             .default_open(n > 0)
-            .show(ui, |ui| self.attachments_panel(ui, node, "script", ""));
+            .show(ui, |ui| {
+                self.attachments_panel(ui, node, "script", "", 420.0)
+            });
     }
 
     /// Liste des PDF d'un créneau, avec ajout, ouverture, enregistrement et suppression.
@@ -85,6 +99,7 @@ impl StudioApp {
         node: i64,
         slot: &str,
         title: &str,
+        view_height: f32,
     ) {
         let files = attachments::list(&self.conn, node, slot).unwrap_or_default();
         let (mut add, mut open, mut save_as, mut delete) = (false, None, None, None);
@@ -147,10 +162,10 @@ impl StudioApp {
                             .file_name()
                             .map(|n| n.to_string_lossy().to_string())
                             .unwrap_or_default();
-                        if self
-                            .apply(|c| attachments::add(c, node, slot, &name, &bytes))
-                            .is_some()
+                        if let Some(new_id) =
+                            self.apply(|c| attachments::add(c, node, slot, &name, &bytes))
                         {
+                            self.pdf.selected = Some(new_id);
                             self.status = format!("PDF ajouté : {name}");
                         }
                     }
@@ -188,7 +203,13 @@ impl StudioApp {
         }
         if let Some(id) = delete {
             self.attach_confirm = None;
+            self.pdf.forget(id);
             self.apply(|c| attachments::delete(c, id));
+        }
+        let files = attachments::list(&self.conn, node, slot).unwrap_or_default();
+        if !files.is_empty() {
+            ui.add_space(6.0);
+            self.pdf_viewer(ui, &files, view_height);
         }
     }
 }

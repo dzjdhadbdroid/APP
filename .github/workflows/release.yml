@@ -16,6 +16,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: PDFium pour l'affichage des PDF
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-win-x64.tgz -OutFile pdfium.tgz
+          New-Item -ItemType Directory -Force pdfium-extract | Out-Null
+          tar -xzf pdfium.tgz -C pdfium-extract
+          New-Item -ItemType Directory -Force assets | Out-Null
+          Copy-Item pdfium-extract/bin/pdfium.dll assets/pdfium.dll
       - name: Tests
         run: cargo test --release
         continue-on-error: true

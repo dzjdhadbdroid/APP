@@ -5,6 +5,7 @@ mod consistency;
 mod db;
 mod graph;
 mod pdf;
+mod pdf_render;
 mod story_date;
 mod ui;
 

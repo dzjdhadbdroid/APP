@@ -1,4 +1,5 @@
 target/
+assets/pdfium.dll
 node_modules/
 dist/
 *.sqlite
