@@ -219,10 +219,11 @@ impl StudioApp {
                     && (!self.graph.only_isolated || !linked.contains(id)))
         });
         let visible: HashSet<i64> = ids.iter().copied().collect();
-        let edges: Vec<&links::Link> = self
+        let edges: Vec<links::Link> = self
             .links
             .iter()
             .filter(|l| visible.contains(&l.src_id) && visible.contains(&l.dst_id))
+            .cloned()
             .collect();
         let pairs: Vec<(i64, i64)> = edges.iter().map(|l| (l.src_id, l.dst_id)).collect();
 
