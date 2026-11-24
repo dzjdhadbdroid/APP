@@ -75,6 +75,8 @@ struct Edit {
     notes: String,
     /// Champs détaillés, dans l'ordre de `fields::defs(kind)`.
     fields: Vec<String>,
+    /// État enregistré, pour repérer les modifications non enregistrées.
+    orig: (String, String, String, Vec<String>),
 }
 
 /// Suppression en attente de confirmation.
@@ -123,6 +125,8 @@ pub struct StudioApp {
     section_view: [View; 6],
     confirm_delete: Option<Confirm>,
     focus: bool,
+    save_requested: bool,
+    show_help: bool,
     pdf: pdf_view::PdfView,
     synopsis_buf: (i64, String),
     attach_confirm: Option<i64>,
@@ -196,6 +200,8 @@ impl StudioApp {
             section_view: nav::default_views(),
             confirm_delete: None,
             focus: false,
+            save_requested: false,
+            show_help: false,
             pdf: pdf_view::PdfView::default(),
             synopsis_buf: (0, String::new()),
             attach_confirm: None,
@@ -275,6 +281,12 @@ impl StudioApp {
                 title: n.title.clone(),
                 summary: n.summary.clone(),
                 notes: n.notes.clone(),
+                orig: (
+                    n.title.clone(),
+                    n.summary.clone(),
+                    n.notes.clone(),
+                    f.clone(),
+                ),
                 fields: f,
             }
         });
@@ -680,7 +692,14 @@ impl StudioApp {
         let mut clicked = None;
         egui::ScrollArea::vertical().id_salt("list").show(ui, |ui| {
             if items.is_empty() {
-                ui.label("Aucun élément.");
+                ui.add_space(8.0);
+                ui.label(RichText::new("Rien ici pour l'instant.").strong());
+                let hint = if self.tag_filter.is_some() {
+                    "Aucun élément avec cette étiquette : change le filtre ci-dessus."
+                } else {
+                    "Tape un nom dans le champ au-dessus puis clique « Créer » pour ajouter le premier."
+                };
+                ui.label(RichText::new(hint).color(theme::muted(ui)));
             }
             for (id, title) in &items {
                 if ui
@@ -706,7 +725,10 @@ impl StudioApp {
         };
         let id = edit.id;
         let kind = self.nodes.iter().find(|n| n.id == id).map(|n| n.kind);
-        let (mut save, mut delete, mut add_scene, mut add_link) = (false, false, false, false);
+        let (mut save, mut delete, mut add_scene, mut add_link) =
+            (self.save_requested, false, false, false);
+        let dirty = (&edit.title, &edit.summary, &edit.notes, &edit.fields)
+            != (&edit.orig.0, &edit.orig.1, &edit.orig.2, &edit.orig.3);
         let (mut open, mut del_link) = (None, None);
         let (mut add_know, mut del_know) = (false, None);
         let mut to_ai = false;
@@ -753,8 +775,24 @@ impl StudioApp {
                     .desired_width(f32::INFINITY),
             );
             ui.horizontal(|ui| {
-                if ui.add(theme::primary_button("Enregistrer")).clicked() {
+                if ui
+                    .add(theme::primary_button("Enregistrer"))
+                    .on_hover_text("Ctrl+S")
+                    .clicked()
+                {
                     save = true;
+                }
+                if dirty {
+                    ui.label(
+                        RichText::new("● modifications non enregistrées")
+                            .color(Color32::from_rgb(255, 180, 80)),
+                    );
+                } else {
+                    ui.label(
+                        RichText::new("✓ enregistré")
+                            .small()
+                            .color(theme::muted(ui)),
+                    );
                 }
                 ui.menu_button("⋯  Actions", |ui| {
                     if kind == Some(NodeKind::Episode) && ui.button("+ Ajouter une scène").clicked()
@@ -987,9 +1025,17 @@ impl StudioApp {
 
         if save {
             // Archive l'état précédent s'il y a un changement, puis enregistre.
-            self.apply(|c| {
+            let saved = self.apply(|c| {
                 history::save_node(c, id, &edit.title, &edit.summary, &edit.notes, &edit.fields)
             });
+            if saved.is_some() {
+                edit.orig = (
+                    edit.title.clone(),
+                    edit.summary.clone(),
+                    edit.notes.clone(),
+                    edit.fields.clone(),
+                );
+            }
         }
         if let Some(parent) = new_parent {
             self.apply(|c| places::set_parent(c, id, parent));
@@ -1072,6 +1118,13 @@ impl eframe::App for StudioApp {
         self.prefs.apply(ctx);
         self.delete_dialog(ctx);
         self.poll_ai(ctx);
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::S)) {
+            self.save_requested = true;
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::K)) {
+            ctx.memory_mut(|m| m.request_focus(egui::Id::new("global_search")));
+        }
+        self.help_window(ctx);
         if self.focus && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.focus = false;
         }
@@ -1115,6 +1168,7 @@ impl eframe::App for StudioApp {
                     View::Settings => self.settings_view(ui),
                 }
             });
+        self.save_requested = false;
         let idx = nav::section_index(nav::section_of(self.view));
         self.section_view[idx] = self.view;
     }

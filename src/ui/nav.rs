@@ -105,9 +105,13 @@ impl StudioApp {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let r = ui.add(
                             egui::TextEdit::singleline(&mut self.search)
-                                .hint_text("Recherche globale…")
+                                .id(egui::Id::new("global_search"))
+                                .hint_text("Recherche globale… (Ctrl+K)")
                                 .desired_width(220.0),
                         );
+                        if ui.button("?").on_hover_text("Aide et raccourcis").clicked() {
+                            self.show_help = true;
+                        }
                         if r.changed() {
                             self.refresh_search();
                         }
@@ -444,5 +448,42 @@ impl StudioApp {
         if let Some(id) = open {
             self.go_to(id);
         }
+    }
+
+    /// Fenêtre d'aide : où trouver quoi, et les raccourcis.
+    pub(super) fn help_window(&mut self, ctx: &egui::Context) {
+        if !self.show_help {
+            return;
+        }
+        let mut open = true;
+        egui::Window::new("Aide")
+            .open(&mut open)
+            .collapsible(false)
+            .default_width(460.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                let row = |ui: &mut egui::Ui, what: &str, text: &str| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(RichText::new(what).strong().color(theme::ACCENT));
+                        ui.label(text);
+                    });
+                };
+                theme::section_title(ui, "Où trouver quoi");
+                row(ui, "Tableau de bord", "vue d'ensemble, carte de l'univers, alertes d'incohérence, assistant IA.");
+                row(ui, "Personnages", "fiches, relations entre personnages, personnages secondaires.");
+                row(ui, "Lieux", "lieux et sous-lieux, objets.");
+                row(ui, "Écriture", "saisons → épisodes → scènes ; synopsis, scénario, PDF ; intrigues et gags.");
+                row(ui, "Chronologie", "ordre réel, diffusion, scènes, par saison, comparaison de personnages.");
+                row(ui, "Paramètres", "thème, sauvegardes, import/export, corbeille.");
+                theme::section_title(ui, "Relier les éléments");
+                ui.label("Dans une fiche, section « Connexions » : relie un élément à un autre. Ces liens alimentent la carte, les chronologies et les alertes d'incohérence.");
+                theme::section_title(ui, "Carte de l'univers");
+                ui.label("Molette pour zoomer, glisser le fond pour se déplacer, glisser un élément pour le repositionner. Clic = fiche à droite, double-clic = explorer ses connexions.");
+                theme::section_title(ui, "Raccourcis");
+                row(ui, "Ctrl+S", "enregistrer la fiche ouverte.");
+                row(ui, "Ctrl+K", "aller à la recherche globale.");
+                row(ui, "Échap", "quitter le mode concentré.");
+            });
+        self.show_help = open;
     }
 }
