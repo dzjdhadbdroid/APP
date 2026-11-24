@@ -28,7 +28,7 @@ use crate::db::{
     knowledge::{self, KnowledgeRow},
     links::{self, Link},
     nodes::{self, Node, NodeKind},
-    places, script, tags, timeline, DbError, DbResult,
+    places, plots, script, tags, timeline, DbError, DbResult,
 };
 
 pub use crate::db::links::{link_type_label, LINK_TYPES};
@@ -121,6 +121,9 @@ pub struct StudioApp {
     section_view: [View; 6],
     confirm_delete: Option<Confirm>,
     focus: bool,
+    gag_only: bool,
+    season_sheet: Option<i64>,
+    season_arc: (i64, String),
     tag_input: String,
     tag_filter: Option<i64>,
     char_secondary: bool,
@@ -188,6 +191,9 @@ impl StudioApp {
             section_view: nav::default_views(),
             confirm_delete: None,
             focus: false,
+            gag_only: false,
+            season_sheet: None,
+            season_arc: (0, String::new()),
             tag_input: String::new(),
             tag_filter: None,
             char_secondary: false,
@@ -275,6 +281,10 @@ impl StudioApp {
             if kind == NodeKind::Character {
                 self.char_secondary = nodes::is_secondary(&self.conn, id).unwrap_or(false);
             }
+            if kind == NodeKind::Plot {
+                self.gag_only = plots::gag_ids(&self.conn).is_ok_and(|g| g.contains(&id));
+            }
+            self.season_sheet = None;
             self.search.clear();
             self.refresh_search();
             self.select(id);
@@ -539,8 +549,11 @@ impl StudioApp {
 
     fn kind_view(&mut self, ui: &mut egui::Ui, kind: NodeKind) {
         let secondary = kind == NodeKind::Character && self.char_secondary;
+        let gag_only = kind == NodeKind::Plot && self.gag_only;
         ui.heading(if secondary {
             "Personnages secondaires"
+        } else if gag_only {
+            "Gags récurrents"
         } else {
             kind.label_plural()
         });
@@ -564,6 +577,11 @@ impl StudioApp {
                         if secondary {
                             nodes::set_secondary(c, id, true)?;
                         }
+                        Ok(id)
+                    }
+                    NodeKind::Plot if gag_only => {
+                        let id = nodes::create(c, kind, &title)?;
+                        plots::set_gag(c, id)?;
                         Ok(id)
                     }
                     _ => nodes::create(c, kind, &title),
@@ -615,6 +633,8 @@ impl StudioApp {
             .map(|t| tags::node_ids(&self.conn, t).unwrap_or_default());
         let secondary_ids = nodes::secondary_ids(&self.conn).unwrap_or_default();
         let want_secondary = self.char_secondary;
+        let gag_ids = plots::gag_ids(&self.conn).unwrap_or_default();
+        let want_gag = self.gag_only;
         let items: Vec<(i64, String)> = self
             .nodes
             .iter()
@@ -623,6 +643,7 @@ impl StudioApp {
             .filter(|n| {
                 kind != NodeKind::Character || secondary_ids.contains(&n.id) == want_secondary
             })
+            .filter(|n| kind != NodeKind::Plot || gag_ids.contains(&n.id) == want_gag)
             .map(|n| (n.id, n.title.clone()))
             .collect();
         let mut clicked = None;
@@ -659,6 +680,11 @@ impl StudioApp {
         let (mut add_know, mut del_know) = (false, None);
         let mut to_ai = false;
         let mut new_parent: Option<Option<i64>> = None;
+        let appearances = if kind == Some(NodeKind::Plot) {
+            plots::appearances(&self.conn, id).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let (cur_parent, kids): (Option<i64>, Vec<(i64, String)>) = if kind == Some(NodeKind::Place)
         {
             (
@@ -769,6 +795,16 @@ impl StudioApp {
                     }
                 });
 
+                if kind == Some(NodeKind::Plot) {
+                    ui.separator();
+                    ui.heading(format!("Apparitions ({} épisode(s))", appearances.len()));
+                    ui.label(RichText::new("Épisodes reliés à cette intrigue, directement ou par une de leurs scènes (fiche → Connexions).").small().color(theme::muted(ui)));
+                    for (ep, title, season, number) in &appearances {
+                        if ui.link(format!("S{season}E{number} · {title}")).clicked() {
+                            open = Some(*ep);
+                        }
+                    }
+                }
                 if kind == Some(NodeKind::Place) {
                     ui.separator();
                     ui.heading("Hiérarchie");

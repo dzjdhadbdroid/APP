@@ -135,6 +135,21 @@ pub fn group(kind: NodeKind, column: &str) -> &'static str {
     }
 }
 
+/// Libellé affiché d'une valeur de liste de choix (le code lui-même si inconnu).
+pub fn choice_label(kind: NodeKind, column: &str, code: &str) -> String {
+    defs(kind)
+        .iter()
+        .find(|f| f.column == column)
+        .and_then(|f| match f.kind {
+            FieldKind::Choice(opts) => opts
+                .iter()
+                .find(|(c, _)| *c == code)
+                .map(|(_, l)| l.to_string()),
+            _ => None,
+        })
+        .unwrap_or_else(|| code.to_string())
+}
+
 pub fn defs(kind: NodeKind) -> &'static [FieldDef] {
     match kind {
         NodeKind::Character => CHARACTER,

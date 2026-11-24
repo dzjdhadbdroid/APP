@@ -205,6 +205,27 @@ pub fn import_restoring(conn: &Connection, source: &str) -> DbResult<ImportRepor
     import_inner(conn, source, true)
 }
 
+/// Identifiant actuel d'un élément du fichier : celui qui vient d'être créé, ou (restauration
+/// depuis la corbeille) l'élément du même identifiant qui existe encore.
+fn resolve_id(
+    conn: &Connection,
+    map: &HashMap<i64, i64>,
+    keep_external: bool,
+    old: Option<i64>,
+) -> Option<i64> {
+    let old = old?;
+    if let Some(&new) = map.get(&old) {
+        return Some(new);
+    }
+    let exists = conn
+        .query_row("SELECT COUNT(*) FROM nodes WHERE id = ?1", [old], |r| {
+            r.get::<_, i64>(0)
+        })
+        .unwrap_or(0)
+        > 0;
+    (keep_external && exists).then_some(old)
+}
+
 fn import_inner(conn: &Connection, source: &str, keep_external: bool) -> DbResult<ImportReport> {
     let doc: Value =
         serde_json::from_str(source).map_err(|e| invalid(format!("JSON illisible : {e}")))?;
@@ -277,7 +298,8 @@ fn import_inner(conn: &Connection, source: &str, keep_external: bool) -> DbResul
         let old = v["id"]
             .as_i64()
             .ok_or_else(|| invalid("scène sans identifiant"))?;
-        let Some(&episode) = v["extra"]["episode_id"].as_i64().and_then(|o| map.get(&o)) else {
+        let Some(episode) = resolve_id(&tx, &map, keep_external, v["extra"]["episode_id"].as_i64())
+        else {
             continue; // épisode absent du fichier
         };
         let position = nodes::next_scene_position(&tx, episode)?;
@@ -289,7 +311,7 @@ fn import_inner(conn: &Connection, source: &str, keep_external: bool) -> DbResul
         for b in e["blocks"].as_array().unwrap_or(&empty) {
             let ty = BlockType::parse(b["type"].as_str().unwrap_or("action"))
                 .unwrap_or(BlockType::Action);
-            let speaker = b["character"].as_i64().and_then(|o| map.get(&o)).copied();
+            let speaker = resolve_id(&tx, &map, keep_external, b["character"].as_i64());
             script::add(&tx, new, ty, speaker, &text(b, "text"))?;
         }
         map.insert(old, new);
@@ -297,18 +319,7 @@ fn import_inner(conn: &Connection, source: &str, keep_external: bool) -> DbResul
     }
 
     // Liens et connaissances : un doublon ou une référence manquante est simplement ignoré.
-    let resolve = |old: Option<i64>| -> Option<i64> {
-        let old = old?;
-        map.get(&old).copied().or_else(|| {
-            let exists = tx
-                .query_row("SELECT COUNT(*) FROM nodes WHERE id = ?1", [old], |r| {
-                    r.get::<_, i64>(0)
-                })
-                .unwrap_or(0)
-                > 0;
-            (keep_external && exists).then_some(old)
-        })
-    };
+    let resolve = |old: Option<i64>| resolve_id(&tx, &map, keep_external, old);
     for l in doc["links"].as_array().unwrap_or(&empty) {
         let (Some(a), Some(b)) = (resolve(l["src"].as_i64()), resolve(l["dst"].as_i64())) else {
             continue;

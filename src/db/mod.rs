@@ -8,6 +8,7 @@ pub mod knowledge;
 pub mod links;
 pub mod nodes;
 pub mod places;
+pub mod plots;
 pub mod relations;
 pub mod script;
 pub mod settings;
