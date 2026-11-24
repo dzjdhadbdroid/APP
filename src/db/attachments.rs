@@ -41,6 +41,28 @@ pub fn add(conn: &Connection, node: i64, slot: &str, filename: &str, data: &[u8]
     Ok(conn.last_insert_rowid())
 }
 
+/// Enregistre le texte extrait d'un PDF (500 000 caractères au plus) et met à jour la recherche.
+pub fn set_text(conn: &Connection, id: i64, text: &str) -> DbResult<()> {
+    let text: String = text.chars().take(500_000).collect();
+    let node: i64 = conn
+        .query_row("SELECT node_id FROM attachments WHERE id = ?1", [id], |r| {
+            r.get(0)
+        })
+        .map_err(|_| DbError::NotFound(id))?;
+    conn.execute(
+        "UPDATE attachments SET text = ?2 WHERE id = ?1",
+        params![id, text],
+    )?;
+    super::tags::reindex(conn, node)
+}
+
+pub fn text(conn: &Connection, id: i64) -> DbResult<String> {
+    conn.query_row("SELECT text FROM attachments WHERE id = ?1", [id], |r| {
+        r.get(0)
+    })
+    .map_err(|_| DbError::NotFound(id))
+}
+
 pub fn list(conn: &Connection, node: i64, slot: &str) -> DbResult<Vec<Attachment>> {
     let mut stmt = conn.prepare(
         "SELECT id, filename, size, added_at FROM attachments WHERE node_id = ?1 AND slot = ?2 ORDER BY id",
@@ -93,6 +115,14 @@ mod tests {
             (1, "mon synopsis.pdf", pdf.len() as i64)
         );
         assert!(super::list(&conn, ep, "script").unwrap().is_empty());
+        set_text(&conn, id, "Alice entre en trombe").unwrap();
+        assert_eq!(text(&conn, id).unwrap(), "Alice entre en trombe");
+        assert_eq!(
+            crate::db::nodes::search_text(&conn, "trombe")
+                .unwrap()
+                .len(),
+            1
+        );
         assert_eq!(data(&conn, id).unwrap().1, pdf);
         nodes::delete(&conn, ep).unwrap(); // supprimé avec l'épisode
         assert!(data(&conn, id).is_err());

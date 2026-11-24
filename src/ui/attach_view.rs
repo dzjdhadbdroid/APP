@@ -166,6 +166,11 @@ impl StudioApp {
                             self.apply(|c| attachments::add(c, node, slot, &name, &bytes))
                         {
                             self.pdf.selected = Some(new_id);
+                            if let Ok(text) =
+                                crate::pdf_render::extract_text(&self.data_dir, &bytes)
+                            {
+                                self.apply(|c| attachments::set_text(c, new_id, &text));
+                            }
                             self.status = format!("PDF ajouté : {name}");
                         }
                     }

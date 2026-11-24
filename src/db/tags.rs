@@ -49,7 +49,7 @@ pub fn node_ids(conn: &Connection, tag: i64) -> DbResult<HashSet<i64>> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-fn reindex(conn: &Connection, node: i64) -> DbResult<()> {
+pub(crate) fn reindex(conn: &Connection, node: i64) -> DbResult<()> {
     let kind: String = conn
         .query_row("SELECT kind FROM nodes WHERE id = ?1", [node], |r| r.get(0))
         .optional()?

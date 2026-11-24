@@ -248,6 +248,12 @@ pub fn rebuild_body(conn: &Connection, kind: NodeKind, id: i64) -> DbResult<()> 
             parts.push(row?);
         }
     }
+    // Le texte des PDF rattachés est indexé lui aussi.
+    let mut stmt =
+        conn.prepare("SELECT text FROM attachments WHERE node_id = ?1 AND text <> '' ORDER BY id")?;
+    for t in stmt.query_map([id], |r| r.get::<_, String>(0))? {
+        parts.push(t?);
+    }
     // Les étiquettes sont indexées avec le reste du texte.
     let mut stmt = conn.prepare(
         "SELECT t.name FROM node_tags nt JOIN tags t ON t.id = nt.tag_id

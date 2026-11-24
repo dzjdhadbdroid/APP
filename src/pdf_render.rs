@@ -32,6 +32,33 @@ fn library_path(_data_dir: &Path) -> Result<PathBuf, String> {
     Err("l'affichage des PDF n'est pas inclus dans cette version (utilise « Ouvrir »)".into())
 }
 
+/// Texte du PDF, page par page (séparées par une ligne vide).
+pub fn extract_text(data_dir: &Path, bytes: &[u8]) -> Result<String, String> {
+    use pdfium_render::prelude::*;
+    let lib = library_path(data_dir)?;
+    let bindings =
+        Pdfium::bind_to_library(&lib).map_err(|e| format!("PDFium indisponible : {e}"))?;
+    let pdfium = Pdfium::new(bindings);
+    let doc = pdfium
+        .load_pdf_from_byte_slice(bytes, None)
+        .map_err(|e| format!("PDF illisible : {e}"))?;
+    let mut out = String::new();
+    for page in doc.pages().iter() {
+        let text = page
+            .text()
+            .map_err(|e| format!("texte illisible : {e}"))?
+            .all();
+        let text = text.replace("\r\n", "\n");
+        if !text.trim().is_empty() {
+            if !out.is_empty() {
+                out.push_str("\n\n");
+            }
+            out.push_str(text.trim_end());
+        }
+    }
+    Ok(out)
+}
+
 /// Rend les `max_pages` premières pages à `width_px` de large. Retourne aussi le nombre total de pages.
 pub fn render_pages(
     data_dir: &Path,
