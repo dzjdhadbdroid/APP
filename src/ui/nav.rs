@@ -215,16 +215,16 @@ impl StudioApp {
                             if ui.small_button("+ Épisode").clicked() {
                                 new_ep = Some(*season);
                             }
-                            if ui
-                                .small_button("Fiche")
-                                .on_hover_text("Fiche de la saison")
-                                .clicked()
-                            {
-                                sheet = Some(*season);
-                            }
-                            if ui.small_button("Supprimer la saison").clicked() {
-                                del_season = Some(*season);
-                            }
+                            ui.menu_button("⋯", |ui| {
+                                if ui.button("Fiche de la saison").clicked() {
+                                    sheet = Some(*season);
+                                    ui.close_menu();
+                                }
+                                if ui.button("Supprimer la saison…").clicked() {
+                                    del_season = Some(*season);
+                                    ui.close_menu();
+                                }
+                            });
                         });
                     });
                 }
@@ -324,15 +324,14 @@ impl StudioApp {
         let mut go = None;
         ui.horizontal(|ui| {
             for (label, v) in &tabs {
-                if ui
-                    .selectable_label(self.view == *v, RichText::new(*label).size(14.0))
-                    .clicked()
-                {
+                if theme::tab(ui, self.view == *v, label) {
                     go = Some(*v);
                 }
             }
         });
+        ui.add_space(4.0);
         ui.separator();
+        ui.add_space(6.0);
         if let Some(v) = go {
             self.switch_view(v);
         }

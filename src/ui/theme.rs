@@ -172,3 +172,40 @@ pub fn card(ui: &egui::Ui) -> egui::Frame {
 pub fn muted(ui: &egui::Ui) -> Color32 {
     palette(ui.visuals().dark_mode).muted
 }
+
+/// Titre de section d'une fiche : petit, discret, en majuscules (hiérarchie sous le titre de page).
+pub fn section_title(ui: &mut egui::Ui, text: &str) {
+    ui.add_space(14.0);
+    ui.label(
+        egui::RichText::new(text.to_uppercase())
+            .small()
+            .strong()
+            .color(muted(ui)),
+    );
+    ui.add_space(2.0);
+}
+
+/// Onglet de page : texte seul, soulignement d'accent pour l'onglet actif. Retourne `true` au clic.
+pub fn tab(ui: &mut egui::Ui, active: bool, label: &str) -> bool {
+    let color = if active {
+        ui.visuals().strong_text_color()
+    } else {
+        muted(ui)
+    };
+    let r = ui.add(
+        egui::Label::new(egui::RichText::new(label).size(15.0).color(color))
+            .sense(egui::Sense::click()),
+    );
+    if active {
+        let y = r.rect.bottom() + 3.0;
+        ui.painter()
+            .hline(r.rect.x_range(), y, Stroke::new(2.0, ACCENT));
+    }
+    ui.add_space(10.0);
+    r.clicked()
+}
+
+/// Bouton d'action principale (une seule par écran).
+pub fn primary_button(text: &str) -> egui::Button<'static> {
+    egui::Button::new(egui::RichText::new(text).strong().color(Color32::WHITE)).fill(ACCENT)
+}

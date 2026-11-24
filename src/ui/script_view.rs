@@ -49,9 +49,15 @@ impl StudioApp {
             return false;
         }
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.detail_tab, DetailTab::Sheet, "Fiche");
-            ui.selectable_value(&mut self.detail_tab, DetailTab::Synopsis, "Synopsis");
-            ui.selectable_value(&mut self.detail_tab, DetailTab::Script, "Scénario");
+            for (tab, label) in [
+                (DetailTab::Sheet, "Fiche"),
+                (DetailTab::Synopsis, "Synopsis"),
+                (DetailTab::Script, "Scénario"),
+            ] {
+                if super::theme::tab(ui, self.detail_tab == tab, label) {
+                    self.detail_tab = tab;
+                }
+            }
         });
         ui.separator();
         if self.detail_tab == DetailTab::Sheet {
@@ -88,7 +94,7 @@ impl StudioApp {
                 export_pdf = true;
             }
         });
-        self.attachments_panel(ui, episode, "script", "PDF de scénario déjà rédigé");
+        self.pdf_section(ui, episode);
         ui.separator();
         egui::ScrollArea::vertical()
             .id_salt("episode_scenes")
@@ -192,19 +198,27 @@ impl StudioApp {
                     apply_structure = true;
                 }
                 ui.label(RichText::new("0 = non renseigné").color(Color32::from_gray(135)));
-                if ui.button("Supprimer la scène").clicked() {
-                    delete_scene = true;
-                }
-                if ui
-                    .button("Mode concentré")
-                    .on_hover_text("Plein écran, sans menus (Échap pour sortir)")
-                    .clicked()
-                {
-                    focus = true;
-                }
-                if ui.button("→ Relire avec l'IA").clicked() {
-                    review = true;
-                }
+                ui.menu_button("⋯  Actions", |ui| {
+                    if ui.button("Mode concentré (Échap pour sortir)").clicked() {
+                        focus = true;
+                        ui.close_menu();
+                    }
+                    if ui.button("→ Relire avec l'IA").clicked() {
+                        review = true;
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui
+                        .button(
+                            RichText::new("Supprimer la scène…")
+                                .color(Color32::from_rgb(255, 110, 110)),
+                        )
+                        .clicked()
+                    {
+                        delete_scene = true;
+                        ui.close_menu();
+                    }
+                });
             });
         }
         if focus {
@@ -220,7 +234,7 @@ impl StudioApp {
             self.confirm_delete = Some(Confirm::Node(scene));
         }
         ui.separator();
-        self.attachments_panel(ui, scene, "script", "PDF de scénario déjà rédigé");
+        self.pdf_section(ui, scene);
         ui.separator();
 
         let (mut mv, mut del, mut add) = (None, None, None);

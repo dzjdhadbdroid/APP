@@ -69,6 +69,15 @@ impl StudioApp {
         self.attachments_panel(ui, id, "synopsis", "PDF de synopsis");
     }
 
+    /// PDF de scénario déjà rédigés : section repliée tant qu'on n'en a pas besoin.
+    pub(super) fn pdf_section(&mut self, ui: &mut egui::Ui, node: i64) {
+        let n = attachments::list(&self.conn, node, "script").map_or(0, |v| v.len());
+        egui::CollapsingHeader::new(format!("PDF de scénario déjà rédigé ({n})"))
+            .id_salt(("pdf_section", node))
+            .default_open(n > 0)
+            .show(ui, |ui| self.attachments_panel(ui, node, "script", ""));
+    }
+
     /// Liste des PDF d'un créneau, avec ajout, ouverture, enregistrement et suppression.
     pub(super) fn attachments_panel(
         &mut self,
@@ -80,7 +89,9 @@ impl StudioApp {
         let files = attachments::list(&self.conn, node, slot).unwrap_or_default();
         let (mut add, mut open, mut save_as, mut delete) = (false, None, None, None);
         ui.horizontal(|ui| {
-            ui.label(RichText::new(title).strong());
+            if !title.is_empty() {
+                ui.label(RichText::new(title).strong());
+            }
             if ui.button("+ Ajouter un PDF…").clicked() {
                 add = true;
             }

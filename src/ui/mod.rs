@@ -405,10 +405,11 @@ impl StudioApp {
 
     fn dashboard(&mut self, ui: &mut egui::Ui) {
         ui.heading("Tableau de bord");
-        ui.add_space(8.0);
+        ui.add_space(10.0);
         let mut goto = None;
         let mut open = None;
 
+        // 1. Vue chiffrée de l'univers
         ui.horizontal_wrapped(|ui| {
             for kind in [
                 NodeKind::Character,
@@ -423,7 +424,7 @@ impl StudioApp {
                     ui.vertical(|ui| {
                         ui.label(
                             RichText::new(n.to_string())
-                                .size(30.0)
+                                .size(28.0)
                                 .color(kind_color(kind)),
                         );
                         if ui.link(kind.label_plural()).clicked() {
@@ -434,45 +435,83 @@ impl StudioApp {
             }
         });
 
-        ui.add_space(12.0);
-        let in_progress = nodes::episodes_in_progress(&self.conn).unwrap_or_default();
-        ui.heading(format!(
-            "Épisodes en cours d'écriture ({})",
-            in_progress.len()
-        ));
-        for (id, title) in &in_progress {
-            if ui.link(title).clicked() {
-                open = Some(*id);
-            }
+        // 2. Ce qui demande de l'attention : alertes, seulement s'il y en a
+        let open_alerts: Vec<&crate::db::alerts::AlertRow> =
+            self.alerts.iter().filter(|a| a.status == "open").collect();
+        if !open_alerts.is_empty() {
+            let count = |sev: &str| open_alerts.iter().filter(|a| a.severity == sev).count();
+            ui.add_space(10.0);
+            theme::card(ui).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Incohérences à vérifier").strong());
+                    ui.label(
+                        RichText::new(format!("{} erreur(s)", count("error")))
+                            .color(Color32::from_rgb(255, 90, 90)),
+                    );
+                    ui.label(
+                        RichText::new(format!("{} attention", count("warning")))
+                            .color(Color32::from_rgb(255, 180, 80)),
+                    );
+                    ui.label(
+                        RichText::new(format!("{} info", count("info")))
+                            .color(Color32::from_rgb(120, 190, 255)),
+                    );
+                    if ui.link("Voir").clicked() {
+                        goto = Some(View::Alerts);
+                    }
+                });
+            });
         }
-        if !self.prefs.recent.is_empty() {
-            ui.add_space(12.0);
-            ui.heading("Consultés récemment");
-            for id in self.prefs.recent.iter().take(8) {
+
+        // 3. Reprendre / activité, sur deux colonnes
+        ui.add_space(8.0);
+        let in_progress = nodes::episodes_in_progress(&self.conn).unwrap_or_default();
+        let mut recent: Vec<&Node> = self.nodes.iter().collect();
+        recent.sort_by(|a, b| b.updated_at.cmp(&a.updated_at).then(b.id.cmp(&a.id)));
+        ui.columns(2, |cols| {
+            let ui = &mut cols[0];
+            theme::section_title(ui, "Épisodes en cours d'écriture");
+            if in_progress.is_empty() {
+                ui.label(RichText::new("Aucun épisode en cours.").color(theme::muted(ui)));
+            }
+            for (id, title) in &in_progress {
+                if ui.link(title).clicked() {
+                    open = Some(*id);
+                }
+            }
+            theme::section_title(ui, "Consultés récemment");
+            for id in self.prefs.recent.iter().take(6) {
                 if let Some(n) = self.nodes.iter().find(|n| n.id == *id) {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(n.kind.label()).color(kind_color(n.kind)));
+                        ui.label(
+                            RichText::new(n.kind.label())
+                                .small()
+                                .color(kind_color(n.kind)),
+                        );
                         if ui.link(&n.title).clicked() {
                             open = Some(n.id);
                         }
                     });
                 }
             }
-        }
-        ui.add_space(12.0);
-        ui.heading("Derniers éléments modifiés");
-        let mut recent: Vec<&Node> = self.nodes.iter().collect();
-        recent.sort_by(|a, b| b.updated_at.cmp(&a.updated_at).then(b.id.cmp(&a.id)));
-        for n in recent.into_iter().take(8) {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(n.kind.label()).color(kind_color(n.kind)));
-                if ui.link(&n.title).clicked() {
-                    open = Some(n.id);
-                }
-            });
-        }
 
-        ui.add_space(12.0);
+            let ui = &mut cols[1];
+            theme::section_title(ui, "Derniers éléments modifiés");
+            for n in recent.iter().take(8) {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(n.kind.label())
+                            .small()
+                            .color(kind_color(n.kind)),
+                    );
+                    if ui.link(&n.title).clicked() {
+                        open = Some(n.id);
+                    }
+                });
+            }
+        });
+
+        // 4. Hygiène de l'univers, repliée par défaut
         let linked: HashSet<i64> = self
             .links
             .iter()
@@ -483,40 +522,24 @@ impl StudioApp {
             .iter()
             .filter(|n| !linked.contains(&n.id))
             .collect();
-        ui.heading(format!("Éléments isolés ({})", isolated.len()));
-        for n in isolated.into_iter().take(8) {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(n.kind.label()).color(kind_color(n.kind)));
-                if ui.link(&n.title).clicked() {
-                    open = Some(n.id);
+        ui.add_space(10.0);
+        egui::CollapsingHeader::new(format!("Éléments sans aucun lien ({})", isolated.len()))
+            .id_salt("isolated")
+            .default_open(false)
+            .show(ui, |ui| {
+                for n in isolated.into_iter().take(20) {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(n.kind.label())
+                                .small()
+                                .color(kind_color(n.kind)),
+                        );
+                        if ui.link(&n.title).clicked() {
+                            open = Some(n.id);
+                        }
+                    });
                 }
             });
-        }
-        ui.add_space(12.0);
-        let count = |sev: &str| {
-            self.alerts
-                .iter()
-                .filter(|a| a.status == "open" && a.severity == sev)
-                .count()
-        };
-        ui.heading("Alertes de cohérence");
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(format!("{} erreur(s)", count("error")))
-                    .color(Color32::from_rgb(255, 90, 90)),
-            );
-            ui.label(
-                RichText::new(format!("{} attention", count("warning")))
-                    .color(Color32::from_rgb(255, 180, 80)),
-            );
-            ui.label(
-                RichText::new(format!("{} info", count("info")))
-                    .color(Color32::from_rgb(120, 190, 255)),
-            );
-            if ui.link("Voir les alertes").clicked() {
-                goto = Some(View::Alerts);
-            }
-        });
 
         if let Some(v) = goto {
             self.switch_view(v);
@@ -721,8 +744,37 @@ impl StudioApp {
             let all_links = &self.links;
             let form = &mut self.link_form;
             let tag_input = &mut self.tag_input;
+            ui.add(
+                egui::TextEdit::singleline(&mut edit.title)
+                    .font(egui::TextStyle::Heading)
+                    .desired_width(f32::INFINITY),
+            );
+            ui.horizontal(|ui| {
+                if ui.add(theme::primary_button("Enregistrer")).clicked() {
+                    save = true;
+                }
+                ui.menu_button("⋯  Actions", |ui| {
+                    if kind == Some(NodeKind::Episode) && ui.button("+ Ajouter une scène").clicked()
+                    {
+                        add_scene = true;
+                        ui.close_menu();
+                    }
+                    if ui.button("→ Travailler avec l'assistant IA").clicked() {
+                        to_ai = true;
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui
+                        .button(RichText::new("Supprimer…").color(Color32::from_rgb(255, 110, 110)))
+                        .clicked()
+                    {
+                        delete = true;
+                        ui.close_menu();
+                    }
+                });
+            });
+            ui.add_space(4.0);
             egui::ScrollArea::vertical().id_salt("detail").show(ui, |ui| {
-                ui.add(egui::TextEdit::singleline(&mut edit.title).desired_width(f32::INFINITY));
                 ui.horizontal_wrapped(|ui| {
                     for (tid, name) in &my_tags {
                         ui.label(RichText::new(format!("#{name}")).color(theme::ACCENT));
@@ -785,24 +837,8 @@ impl StudioApp {
                             });
                     }
                 }
-                ui.horizontal(|ui| {
-                    if ui.button("Enregistrer").clicked() {
-                        save = true;
-                    }
-                    if ui.button("Supprimer").clicked() {
-                        delete = true;
-                    }
-                    if ui.button("→ Assistant IA").clicked() {
-                        to_ai = true;
-                    }
-                    if kind == Some(NodeKind::Episode) && ui.button("+ Scène").clicked() {
-                        add_scene = true;
-                    }
-                });
-
                 if kind == Some(NodeKind::Plot) {
-                    ui.separator();
-                    ui.heading(format!("Apparitions ({} épisode(s))", appearances.len()));
+                    theme::section_title(ui, &format!("Apparitions ({} épisode(s))", appearances.len()));
                     ui.label(RichText::new("Épisodes reliés à cette intrigue, directement ou par une de leurs scènes (fiche → Connexions).").small().color(theme::muted(ui)));
                     for (ep, title, season, number) in &appearances {
                         if ui.link(format!("S{season}E{number} · {title}")).clicked() {
@@ -811,8 +847,7 @@ impl StudioApp {
                     }
                 }
                 if kind == Some(NodeKind::Place) {
-                    ui.separator();
-                    ui.heading("Hiérarchie");
+                    theme::section_title(ui, "Hiérarchie");
                     let shown = cur_parent.map_or("(lieu principal)".to_string(), |p| title_in(nodes, p).to_string());
                     ui.horizontal(|ui| {
                         ui.label("Situé dans :");
@@ -835,8 +870,7 @@ impl StudioApp {
                     }
                 }
 
-                ui.separator();
-                ui.heading("Connexions");
+                theme::section_title(ui, "Connexions");
                 for l in all_links.iter().filter(|l| l.src_id == id || l.dst_id == id) {
                     let (arrow, other) = if l.src_id == id {
                         ("→", l.dst_id)
@@ -907,8 +941,7 @@ impl StudioApp {
                     });
 
                 if kind == Some(NodeKind::Character) {
-                    ui.separator();
-                    ui.heading("Connaissances");
+                    theme::section_title(ui, "Connaissances");
                     ui.label(
                         RichText::new("Ce que ce personnage sait, et à quel événement il l'apprend (sert aux alertes de cohérence).")
                             .color(Color32::from_gray(130)),
