@@ -4,6 +4,7 @@
 
 mod ai_view;
 mod alerts_view;
+mod attach_view;
 mod data_view;
 mod graph_view;
 mod nav;
@@ -121,6 +122,8 @@ pub struct StudioApp {
     section_view: [View; 6],
     confirm_delete: Option<Confirm>,
     focus: bool,
+    synopsis_buf: (i64, String),
+    attach_confirm: Option<i64>,
     gag_only: bool,
     season_sheet: Option<i64>,
     season_arc: (i64, String),
@@ -191,6 +194,8 @@ impl StudioApp {
             section_view: nav::default_views(),
             confirm_delete: None,
             focus: false,
+            synopsis_buf: (0, String::new()),
+            attach_confirm: None,
             gag_only: false,
             season_sheet: None,
             season_arc: (0, String::new()),

@@ -1,6 +1,7 @@
 //! Couche d'accès aux données : connexion, migrations, dépôts (repositories).
 
 pub mod alerts;
+pub mod attachments;
 pub mod error;
 pub mod fields;
 pub mod history;
@@ -73,6 +74,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (6, include_str!("../../migrations/0006_character_role.sql")),
     (7, include_str!("../../migrations/0007_tags.sql")),
     (8, include_str!("../../migrations/0008_trash.sql")),
+    (9, include_str!("../../migrations/0009_attachments.sql")),
 ];
 
 pub fn open(path: &Path) -> DbResult<Connection> {
@@ -256,7 +258,7 @@ mod tests {
         let v: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 8);
+        assert_eq!(v, 9);
     }
 
     #[test]
@@ -279,7 +281,7 @@ mod tests {
             conn.query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0))
                 .unwrap(),
         );
-        assert_eq!((v, n), (8, 1));
+        assert_eq!((v, n), (9, 1));
         conn.execute("UPDATE characters SET evolution = 'x' WHERE id = 1", [])
             .unwrap(); // colonne ajoutée
     }

@@ -16,6 +16,7 @@ use crate::db::{
 pub enum DetailTab {
     #[default]
     Sheet,
+    Synopsis,
     Script,
 }
 
@@ -49,11 +50,16 @@ impl StudioApp {
         }
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.detail_tab, DetailTab::Sheet, "Fiche");
+            ui.selectable_value(&mut self.detail_tab, DetailTab::Synopsis, "Synopsis");
             ui.selectable_value(&mut self.detail_tab, DetailTab::Script, "Scénario");
         });
         ui.separator();
-        if self.detail_tab != DetailTab::Script {
+        if self.detail_tab == DetailTab::Sheet {
             return false;
+        }
+        if self.detail_tab == DetailTab::Synopsis {
+            self.synopsis_tab(ui, id, kind);
+            return true;
         }
         match kind {
             NodeKind::Episode => self.episode_script(ui, id),
@@ -82,6 +88,8 @@ impl StudioApp {
                 export_pdf = true;
             }
         });
+        self.attachments_panel(ui, episode, "script", "PDF de scénario déjà rédigé");
+        ui.separator();
         egui::ScrollArea::vertical()
             .id_salt("episode_scenes")
             .show(ui, |ui| {
@@ -211,6 +219,8 @@ impl StudioApp {
         if delete_scene {
             self.confirm_delete = Some(Confirm::Node(scene));
         }
+        ui.separator();
+        self.attachments_panel(ui, scene, "script", "PDF de scénario déjà rédigé");
         ui.separator();
 
         let (mut mv, mut del, mut add) = (None, None, None);
