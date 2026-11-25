@@ -85,6 +85,7 @@ impl StudioApp {
     pub(super) fn top_bar(&mut self, ctx: &egui::Context) {
         let current = section_of(self.view);
         let mut go: Option<Section> = None;
+        let mut undo: Option<bool> = None;
         egui::TopBottomPanel::top("top_nav")
             .frame(theme::bar_frame(ctx, egui::Margin::symmetric(16, 8)))
             .show(ctx, |ui| {
@@ -117,10 +118,31 @@ impl StudioApp {
                         if r.changed() {
                             self.refresh_search();
                         }
+                        let (can_undo, can_redo) = (
+                            crate::db::undo::can_undo(&self.conn),
+                            crate::db::undo::can_redo(&self.conn),
+                        );
+                        if ui
+                            .add_enabled(can_redo, egui::Button::new("↷"))
+                            .on_hover_text("Rétablir (Ctrl+Y)")
+                            .clicked()
+                        {
+                            undo = Some(true);
+                        }
+                        if ui
+                            .add_enabled(can_undo, egui::Button::new("↶"))
+                            .on_hover_text("Annuler la dernière action (Ctrl+Z)")
+                            .clicked()
+                        {
+                            undo = Some(false);
+                        }
                     });
                 });
                 ui.add_space(2.0);
             });
+        if let Some(redo) = undo {
+            self.undo_redo(redo);
+        }
         if let Some(s) = go {
             let v = self.section_view[section_index(s)];
             self.search.clear();
@@ -485,6 +507,7 @@ impl StudioApp {
                 theme::section_title(ui, "Raccourcis");
                 row(ui, "Ctrl+S", "enregistrer la fiche ouverte.");
                 row(ui, "Ctrl+K", "aller à la recherche globale.");
+                row(ui, "Ctrl+Z / Ctrl+Y", "annuler / rétablir la dernière action (hors saisie de texte).");
                 row(ui, "Échap", "quitter le mode concentré.");
             });
         self.show_help = open;

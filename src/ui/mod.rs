@@ -178,6 +178,7 @@ impl StudioApp {
     pub fn new(conn: Connection, data_dir: PathBuf) -> Self {
         let ai = ai_view::AiState::load(&conn);
         let prefs = settings_view::Prefs::load(&conn);
+        let _ = db::undo::install(&conn);
         let mut app = Self {
             conn,
             data_dir,
@@ -253,6 +254,34 @@ impl StudioApp {
         self.graph.settle = 300; // le graphe se réorganise après chaque changement
     }
 
+    /// Annule (ou rétablit) la dernière action, puis recharge tout.
+    fn undo_redo(&mut self, redo: bool) {
+        let r = if redo {
+            db::undo::redo(&self.conn)
+        } else {
+            db::undo::undo(&self.conn)
+        };
+        self.status = match r {
+            Ok(true) => {
+                if redo {
+                    "Action rétablie.".into()
+                } else {
+                    "Action annulée.".into()
+                }
+            }
+            Ok(false) => {
+                if redo {
+                    "Rien à rétablir.".into()
+                } else {
+                    "Rien à annuler.".into()
+                }
+            }
+            Err(e) => format!("Erreur : {e}"),
+        };
+        self.edit = None;
+        self.reload();
+    }
+
     fn refresh_search(&mut self) {
         self.search_results = if self.search.trim().is_empty() {
             Vec::new()
@@ -263,7 +292,10 @@ impl StudioApp {
 
     /// Exécute une écriture ; en cas de succès recharge tout, sinon affiche l'erreur.
     fn apply<T>(&mut self, f: impl FnOnce(&Connection) -> DbResult<T>) -> Option<T> {
-        match f(&self.conn) {
+        let _ = db::undo::begin(&self.conn);
+        let result = f(&self.conn);
+        let _ = db::undo::end(&self.conn);
+        match result {
             Ok(v) => {
                 self.status = String::from("Enregistré.");
                 self.reload();
@@ -1131,6 +1163,19 @@ impl eframe::App for StudioApp {
         ctx.request_repaint_after(AUTO_BACKUP_EVERY);
         self.delete_dialog(ctx);
         self.poll_ai(ctx);
+        // Annuler / rétablir, sauf quand un champ de texte a le focus (il a son propre Ctrl+Z).
+        if !ctx.wants_keyboard_input() {
+            let redo = ctx.input_mut(|i| {
+                i.consume_key(
+                    egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                    egui::Key::Z,
+                ) || i.consume_key(egui::Modifiers::COMMAND, egui::Key::Y)
+            });
+            let undo = ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z));
+            if redo || undo {
+                self.undo_redo(redo);
+            }
+        }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::S)) {
             self.save_requested = true;
         }
