@@ -3,7 +3,7 @@
 use eframe::egui::{self, Color32, RichText, Sense, Vec2};
 
 use super::{kind_color, theme, StudioApp};
-use crate::db::{analysis, nodes::NodeKind, timeline};
+use crate::db::{analysis, nodes::NodeKind, pdf_analysis, timeline};
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tab {
@@ -12,6 +12,7 @@ pub enum Tab {
     Gags,
     Wall,
     Stats,
+    Pdf,
 }
 
 #[derive(Default)]
@@ -144,6 +145,7 @@ impl StudioApp {
                 (Tab::Gags, "Suivi des gags"),
                 (Tab::Wall, "Frise de saison"),
                 (Tab::Stats, "Statistiques"),
+                (Tab::Pdf, "Recoupement PDF"),
             ] {
                 if ui.selectable_label(self.analysis.tab == t, label).clicked() {
                     self.analysis.tab = t;
@@ -157,6 +159,7 @@ impl StudioApp {
                 Tab::Balance | Tab::Wall => self.season_tabs(ui),
                 Tab::Gags => self.gags_tab(ui),
                 Tab::Stats => self.stats_tab(ui),
+                Tab::Pdf => self.pdf_check_tab(ui),
             });
     }
 
@@ -462,4 +465,126 @@ fn bar_chart(ui: &mut egui::Ui, data: &[(String, i64)], color: Color32) {
                 );
             }
         });
+}
+
+impl StudioApp {
+    /// Recoupe le texte des PDF (scénario, synopsis) avec la bible.
+    fn pdf_check_tab(&mut self, ui: &mut egui::Ui) {
+        let Ok(checks) = pdf_analysis::cross_check(&self.conn) else {
+            ui.label("Impossible d'analyser les PDF.");
+            return;
+        };
+        ui.label(
+            RichText::new(
+                "Le texte des PDF rattachés aux épisodes est lu pour repérer qui parle (nom en majuscules \
+                 avant la réplique, ou « NOM : réplique »), les lieux (intitulés INT./EXT.) et les personnages \
+                 cités, puis comparé à ta bible. Lecture automatique : à vérifier, surtout si la mise en page est inhabituelle.",
+            )
+            .color(theme::muted(ui)),
+        );
+        if checks.is_empty() {
+            ui.add_space(8.0);
+            ui.label(
+                "Aucun PDF avec du texte lisible. Importe un scénario ou un synopsis dans un épisode \
+                 (un PDF scanné, sans texte, ne peut pas être analysé).",
+            );
+            return;
+        }
+        let mut create_char: Option<String> = None;
+        let mut create_place: Option<String> = None;
+        let mut open = None;
+        for c in &checks {
+            ui.add_space(8.0);
+            theme::card(ui).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                if ui
+                    .link(RichText::new(&c.title).strong().size(16.0))
+                    .clicked()
+                {
+                    open = Some(c.episode_id);
+                }
+                if c.script.speakers.is_empty() && c.script.locations.is_empty() {
+                    ui.label(
+                        RichText::new("Aucun intervenant ni lieu détecté dans le scénario.")
+                            .small(),
+                    );
+                }
+                if !c.script.speakers.is_empty() {
+                    ui.label(RichText::new("Qui parle").small().color(theme::muted(ui)));
+                    for (s, id) in c.script.speakers.iter().zip(&c.speaker_ids) {
+                        ui.horizontal(|ui| match id {
+                            Some(_) => {
+                                ui.colored_label(Color32::from_rgb(120, 200, 130), "✓");
+                                ui.label(format!(
+                                    "{} — {} réplique(s), {} mots",
+                                    s.name, s.lines, s.words
+                                ));
+                            }
+                            None => {
+                                ui.colored_label(Color32::from_rgb(255, 150, 90), "⚠");
+                                ui.label(format!(
+                                    "{} — {} réplique(s), {} mots · absent de la bible",
+                                    s.name, s.lines, s.words
+                                ));
+                                if ui.small_button("Créer la fiche").clicked() {
+                                    create_char = Some(s.name.clone());
+                                }
+                            }
+                        });
+                    }
+                }
+                if !c.script.locations.is_empty() {
+                    ui.add_space(4.0);
+                    ui.label(RichText::new("Lieux").small().color(theme::muted(ui)));
+                    for ((l, n), id) in c.script.locations.iter().zip(&c.place_ids) {
+                        ui.horizontal(|ui| match id {
+                            Some(_) => {
+                                ui.colored_label(Color32::from_rgb(120, 200, 130), "✓");
+                                ui.label(format!("{l} — {n} scène(s)"));
+                            }
+                            None => {
+                                ui.colored_label(Color32::from_rgb(255, 150, 90), "⚠");
+                                ui.label(format!("{l} — {n} scène(s) · absent de la bible"));
+                                if ui.small_button("Créer le lieu").clicked() {
+                                    create_place = Some(l.clone());
+                                }
+                            }
+                        });
+                    }
+                }
+                if !c.mentioned_only.is_empty() {
+                    ui.add_space(4.0);
+                    let names: Vec<&str> = c.mentioned_only.iter().map(|m| m.1.as_str()).collect();
+                    ui.label(
+                        RichText::new(format!("Cités sans parler : {}", names.join(", "))).small(),
+                    );
+                }
+            });
+        }
+        if let Some(id) = open {
+            self.go_to(id);
+        }
+        if let Some(name) = create_char {
+            let title = capitalize(&name);
+            self.apply(|conn| crate::db::nodes::create(conn, NodeKind::Character, &title));
+        }
+        if let Some(name) = create_place {
+            let title = capitalize(&name);
+            self.apply(|conn| crate::db::nodes::create(conn, NodeKind::Place, &title));
+        }
+    }
+}
+
+/// « ALICE MARTIN » → « Alice Martin ».
+fn capitalize(s: &str) -> String {
+    s.split(' ')
+        .map(|w| {
+            let mut c = w.chars();
+            match c.next() {
+                Some(f) => f.to_uppercase().collect::<String>() + &c.as_str().to_lowercase(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }

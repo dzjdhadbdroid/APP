@@ -104,6 +104,21 @@ pub fn speech_matrix(conn: &Connection, season: i64) -> DbResult<Matrix> {
     let cells: Vec<(i64, i64, i64)> = stmt
         .query_map([season], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<Result<_, _>>()?;
+    let mut cells = cells;
+    // Épisodes sans réplique saisie : on prend le scénario PDF (s'il y en a un).
+    for col in &columns {
+        let typed: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM scene_blocks b JOIN scenes sc ON sc.id = b.scene_id
+             WHERE sc.episode_id = ?1 AND b.block_type = 'dialogue'",
+            [col.id],
+            |r| r.get(0),
+        )?;
+        if typed == 0 {
+            for (id, _lines, words) in super::pdf_analysis::speech_by_character(conn, col.id)? {
+                cells.push((id, col.id, words));
+            }
+        }
+    }
     let ids: Vec<i64> = cells
         .iter()
         .map(|c| c.0)
