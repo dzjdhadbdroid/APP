@@ -118,6 +118,7 @@ pub struct StudioApp {
     alerts: Vec<AlertRow>,
     show_ignored: bool,
     import_path: String,
+    last_auto_backup: std::time::Instant,
     confirm_restore: Option<PathBuf>,
     ai: ai_view::AiState,
     detail_tab: script_view::DetailTab,
@@ -194,6 +195,7 @@ impl StudioApp {
             alerts: Vec::new(),
             show_ignored: false,
             import_path: String::new(),
+            last_auto_backup: std::time::Instant::now(),
             confirm_restore: None,
             ai,
             detail_tab: script_view::DetailTab::default(),
@@ -1120,6 +1122,13 @@ impl StudioApp {
 impl eframe::App for StudioApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.prefs.apply(ctx);
+        // Sauvegarde automatique toutes les 15 minutes pendant que l'application est ouverte.
+        const AUTO_BACKUP_EVERY: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+        if self.last_auto_backup.elapsed() >= AUTO_BACKUP_EVERY {
+            self.last_auto_backup = std::time::Instant::now();
+            let _ = db::auto_backup(&self.conn, &self.data_dir, 20);
+        }
+        ctx.request_repaint_after(AUTO_BACKUP_EVERY);
         self.delete_dialog(ctx);
         self.poll_ai(ctx);
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::S)) {

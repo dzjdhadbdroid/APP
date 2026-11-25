@@ -90,7 +90,7 @@ impl StudioApp {
                 .color(Color32::from_gray(140)),
         );
         ui.label(
-            RichText::new("Tout est enregistré localement et immédiatement. Une sauvegarde automatique est faite à chaque lancement (10 conservées).")
+            RichText::new("Tout est enregistré localement et immédiatement. Une sauvegarde automatique est faite à chaque lancement puis toutes les 15 minutes (20 conservées).")
                 .color(Color32::from_gray(140)),
         );
         ui.add_space(8.0);
@@ -132,6 +132,14 @@ impl StudioApp {
                     .hint_text("Chemin du fichier .json")
                     .desired_width(420.0),
             );
+            if ui.button("Parcourir…").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Export JSON", &["json"])
+                    .pick_file()
+                {
+                    self.import_path = path.display().to_string();
+                }
+            }
             if ui.button("Importer").clicked() && !self.import_path.trim().is_empty() {
                 // « Copier comme chemin » de Windows entoure le chemin de guillemets.
                 let path = self.import_path.trim().trim_matches('"').to_string();
