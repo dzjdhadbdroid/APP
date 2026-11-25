@@ -398,7 +398,7 @@ mod tests {
             r.locations,
             vec![("CUISINE".to_string(), 1), ("JARDIN".to_string(), 1)]
         );
-        let inl = parse_script("Alice : Salut toi\nNote : rien", &|n| n == "Alice");
+        let inl = parse_script("Alice : Salut toi\n\nNote : rien", &|n| n == "Alice");
         assert_eq!(inl.speakers.len(), 1);
         assert_eq!(inl.speakers[0].words, 2);
     }
