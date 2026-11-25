@@ -6,6 +6,7 @@ pub mod attachments;
 pub mod error;
 pub mod fields;
 pub mod history;
+pub mod images;
 pub mod knowledge;
 pub mod links;
 pub mod nodes;
@@ -82,6 +83,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (
         10,
         include_str!("../../migrations/0010_attachment_text.sql"),
+        (11, include_str!("../../migrations/0011_images.sql")),
     ),
 ];
 
@@ -266,7 +268,7 @@ mod tests {
         let v: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 10);
+        assert_eq!(v, 11);
     }
 
     #[test]
@@ -289,7 +291,7 @@ mod tests {
             conn.query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0))
                 .unwrap(),
         );
-        assert_eq!((v, n), (10, 1));
+        assert_eq!((v, n), (11, 1));
         conn.execute("UPDATE characters SET evolution = 'x' WHERE id = 1", [])
             .unwrap(); // colonne ajoutée
     }

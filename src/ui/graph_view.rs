@@ -436,6 +436,11 @@ impl StudioApp {
             }
         };
 
+        let image_ctx = ui.ctx().clone();
+        let textures: std::collections::HashMap<i64, eframe::egui::TextureHandle> = ids
+            .iter()
+            .filter_map(|id| self.node_texture(&image_ctx, *id).map(|t| (*id, t)))
+            .collect();
         let pos = &self.graph.layout.pos;
         if ids.is_empty() {
             painter.text(
@@ -497,6 +502,22 @@ impl StudioApp {
                 .map_or("", |n| n.title.as_str());
             let in_focus = active == Some(*id) || neighbors.contains(id);
             painter.circle_filled(sp, r, dim(kind_color(*kind), in_focus));
+            if let Some(t) = textures.get(id) {
+                let half = r * 1.25;
+                let img_rect = Rect::from_center_size(sp, vec2(half * 2.0, half * 2.0));
+                painter.image(
+                    t.id(),
+                    img_rect,
+                    Rect::from_min_max(eframe::egui::pos2(0.0, 0.0), eframe::egui::pos2(1.0, 1.0)),
+                    dim(Color32::WHITE, in_focus),
+                );
+                painter.rect_stroke(
+                    img_rect,
+                    0.0,
+                    Stroke::new(2.5, dim(kind_color(*kind), in_focus)),
+                    eframe::egui::StrokeKind::Outside,
+                );
+            }
             if self.selected == Some(*id) {
                 painter.circle_stroke(sp, r + 3.0, Stroke::new(3.0, Color32::WHITE));
             } else if !linked.contains(id) {

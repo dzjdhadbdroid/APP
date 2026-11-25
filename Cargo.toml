@@ -13,3 +13,4 @@ thiserror = "1"
 ureq = { version = "2", features = ["json"] }
 rfd = "0.15"
 pdfium-render = "0.8"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

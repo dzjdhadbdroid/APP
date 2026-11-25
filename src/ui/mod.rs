@@ -140,6 +140,8 @@ pub struct StudioApp {
     season_arc: (i64, String),
     analysis: analysis_view::AnalysisState,
     palette: palette::PaletteState,
+    images: std::collections::HashMap<i64, Option<egui::TextureHandle>>,
+    image_ids: std::collections::HashSet<i64>,
     reader: Option<reader_view::Reader>,
     tag_input: String,
     tag_filter: Option<i64>,
@@ -220,6 +222,8 @@ impl StudioApp {
             season_arc: (0, String::new()),
             analysis: analysis_view::AnalysisState::default(),
             palette: palette::PaletteState::default(),
+            images: std::collections::HashMap::new(),
+            image_ids: std::collections::HashSet::new(),
             reader: None,
             tag_input: String::new(),
             tag_filter: None,
@@ -256,8 +260,35 @@ impl StudioApp {
             Ok(a) => self.alerts = a,
             Err(e) => self.status = format!("Erreur d'analyse : {e}"),
         }
+        self.images.clear();
+        self.image_ids = db::images::ids(&self.conn).unwrap_or_default();
         self.refresh_search();
         self.graph.settle = 300; // le graphe se réorganise après chaque changement
+    }
+
+    /// Texture de l'image d'une fiche (décodée une fois, puis gardée en cache jusqu'au prochain rechargement).
+    fn node_texture(&mut self, ctx: &egui::Context, id: i64) -> Option<egui::TextureHandle> {
+        if !self.image_ids.contains(&id) {
+            return None;
+        }
+        if let Some(t) = self.images.get(&id) {
+            return t.clone();
+        }
+        let tex = db::images::get(&self.conn, id)
+            .ok()
+            .flatten()
+            .and_then(|bytes| image::load_from_memory(&bytes).ok())
+            .map(|img| {
+                let rgba = img.to_rgba8();
+                let size = [rgba.width() as usize, rgba.height() as usize];
+                ctx.load_texture(
+                    format!("node_img_{id}"),
+                    egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw()),
+                    Default::default(),
+                )
+            });
+        self.images.insert(id, tex.clone());
+        tex
     }
 
     /// Annule (ou rétablit) la dernière action, puis recharge tout.
@@ -807,6 +838,13 @@ impl StudioApp {
             Vec::new()
         };
 
+        let portrait_ok = matches!(kind, Some(k) if k != NodeKind::Scene && k != NodeKind::Event);
+        let portrait = if portrait_ok {
+            self.node_texture(ui.ctx(), id)
+        } else {
+            None
+        };
+        let (mut pick_image, mut remove_image) = (false, false);
         {
             let kform = &mut self.know_form;
             let nodes = &self.nodes;
@@ -860,6 +898,26 @@ impl StudioApp {
             });
             ui.add_space(4.0);
             egui::ScrollArea::vertical().id_salt("detail").show(ui, |ui| {
+                if portrait_ok {
+                    ui.horizontal(|ui| {
+                        if let Some(t) = &portrait {
+                            ui.add(
+                                egui::Image::new(egui::load::SizedTexture::from_handle(t))
+                                    .max_size(egui::vec2(170.0, 170.0)),
+                            );
+                        }
+                        ui.vertical(|ui| {
+                            let label = if portrait.is_some() { "Changer l'image…" } else { "+ Ajouter une image…" };
+                            if ui.button(label).on_hover_text("Portrait, plan, photo de référence (PNG ou JPEG)").clicked() {
+                                pick_image = true;
+                            }
+                            if portrait.is_some() && ui.button("Retirer l'image").clicked() {
+                                remove_image = true;
+                            }
+                        });
+                    });
+                    ui.add_space(6.0);
+                }
                 ui.horizontal_wrapped(|ui| {
                     for (tid, name) in &my_tags {
                         ui.label(RichText::new(format!("#{name}")).color(theme::ACCENT));
@@ -1142,6 +1200,22 @@ impl StudioApp {
             if self.apply(|c| tags::add(c, id, &name)).is_some() {
                 self.tag_input.clear();
             }
+        }
+        if pick_image {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("Image", &["png", "jpg", "jpeg"])
+                .pick_file()
+            {
+                match std::fs::read(&path) {
+                    Ok(bytes) => {
+                        self.apply(|c| db::images::set(c, id, &bytes));
+                    }
+                    Err(e) => self.status = format!("Lecture impossible : {e}"),
+                }
+            }
+        }
+        if remove_image {
+            self.apply(|c| db::images::delete(c, id));
         }
         if delete {
             self.confirm_delete = Some(Confirm::Node(id));
