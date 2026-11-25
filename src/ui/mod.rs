@@ -9,7 +9,9 @@ mod attach_view;
 mod data_view;
 mod graph_view;
 mod nav;
+mod palette;
 mod pdf_view;
+mod reader_view;
 mod relations_view;
 mod script_view;
 mod settings_view;
@@ -137,6 +139,8 @@ pub struct StudioApp {
     season_sheet: Option<i64>,
     season_arc: (i64, String),
     analysis: analysis_view::AnalysisState,
+    palette: palette::PaletteState,
+    reader: Option<reader_view::Reader>,
     tag_input: String,
     tag_filter: Option<i64>,
     char_secondary: bool,
@@ -215,6 +219,8 @@ impl StudioApp {
             season_sheet: None,
             season_arc: (0, String::new()),
             analysis: analysis_view::AnalysisState::default(),
+            palette: palette::PaletteState::default(),
+            reader: None,
             tag_input: String::new(),
             tag_filter: None,
             char_secondary: false,
@@ -1161,8 +1167,12 @@ impl eframe::App for StudioApp {
             let _ = db::auto_backup(&self.conn, &self.data_dir, 20);
         }
         ctx.request_repaint_after(AUTO_BACKUP_EVERY);
-        self.delete_dialog(ctx);
         self.poll_ai(ctx);
+        if self.reader_ui(ctx) {
+            return;
+        }
+        self.palette_ui(ctx);
+        self.delete_dialog(ctx);
         // Annuler / rétablir, sauf quand un champ de texte a le focus (il a son propre Ctrl+Z).
         if !ctx.wants_keyboard_input() {
             let redo = ctx.input_mut(|i| {

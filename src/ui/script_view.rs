@@ -79,6 +79,7 @@ impl StudioApp {
         let (mut swap, mut open, mut add_scene) = (None, None, false);
         let mut del_scene: Option<i64> = None;
         let mut export_pdf = false;
+        let mut read = false;
         ui.label(
             RichText::new("Ordre de présentation des scènes de l'épisode. Ouvre une scène pour écrire son scénario.")
                 .color(Color32::from_gray(135)),
@@ -86,6 +87,13 @@ impl StudioApp {
         ui.horizontal(|ui| {
             if ui.button("+ Scène").clicked() {
                 add_scene = true;
+            }
+            if ui
+                .button("Mode lecture")
+                .on_hover_text("Lire l'épisode en plein écran")
+                .clicked()
+            {
+                read = true;
             }
             if ui
                 .button("Exporter en PDF (mise en page scénario)")
@@ -155,6 +163,10 @@ impl StudioApp {
                 links::create(c, episode, scene, "contains", None, None)?;
                 Ok(scene)
             });
+        }
+        if read {
+            let ctx = ui.ctx().clone();
+            self.start_reading(&ctx, episode);
         }
         if export_pdf {
             let title = title_in(&self.nodes, episode).to_string();

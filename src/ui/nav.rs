@@ -507,6 +507,7 @@ impl StudioApp {
                 theme::section_title(ui, "Raccourcis");
                 row(ui, "Ctrl+S", "enregistrer la fiche ouverte.");
                 row(ui, "Ctrl+K", "aller à la recherche globale.");
+                row(ui, "Ctrl+P", "palette de commandes : aller à une fiche, une page ou lancer une action.");
                 row(ui, "Ctrl+Z / Ctrl+Y", "annuler / rétablir la dernière action (hors saisie de texte).");
                 row(ui, "Échap", "quitter le mode concentré.");
             });
