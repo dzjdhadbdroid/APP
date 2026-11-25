@@ -115,6 +115,15 @@ impl StudioApp {
                     .map(|md| crate::pdf::markdown_to_pdf("Bible de la sitcom", &md));
                 self.write_export("univers", "pdf", content);
             }
+            if ui
+                .button("Dossier de présentation (PDF)")
+                .on_hover_text("Personnages principaux, lieux, intrigues et saisons : une version courte de la bible, à montrer")
+                .clicked()
+            {
+                let content = db::pitch::pitch_markdown(&self.conn, "Dossier de présentation")
+                    .map(|md| crate::pdf::markdown_to_pdf("Dossier de présentation", &md));
+                self.write_export("dossier_presentation", "pdf", content);
+            }
             if ui.button("Exporter tout le projet (dossier)").clicked() {
                 self.export_project();
             }

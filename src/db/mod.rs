@@ -10,6 +10,7 @@ pub mod knowledge;
 pub mod links;
 pub mod nodes;
 pub mod pdf_analysis;
+pub mod pitch;
 pub mod places;
 pub mod plots;
 pub mod relations;
