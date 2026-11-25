@@ -1,6 +1,7 @@
 //! Couche d'accès aux données : connexion, migrations, dépôts (repositories).
 
 pub mod alerts;
+pub mod analysis;
 pub mod attachments;
 pub mod error;
 pub mod fields;

@@ -32,7 +32,9 @@ pub const SECTIONS: [(Section, &str); 6] = [
 
 pub fn section_of(view: View) -> Section {
     match view {
-        View::Dashboard | View::Graph | View::Alerts | View::Ai => Section::Dashboard,
+        View::Dashboard | View::Graph | View::Alerts | View::Analysis | View::Ai => {
+            Section::Dashboard
+        }
         View::Relations => Section::Characters,
         View::Timeline => Section::Timeline,
         View::Settings | View::Data | View::Trash => Section::Settings,
@@ -307,6 +309,7 @@ impl StudioApp {
             Section::Dashboard => vec![
                 ("Vue d'ensemble", View::Dashboard),
                 ("Carte de l'univers", View::Graph),
+                ("Analyse", View::Analysis),
                 (alerts_label.as_str(), View::Alerts),
                 ("Assistant IA", View::Ai),
             ],

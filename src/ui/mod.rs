@@ -4,6 +4,7 @@
 
 mod ai_view;
 mod alerts_view;
+mod analysis_view;
 mod attach_view;
 mod data_view;
 mod graph_view;
@@ -62,6 +63,7 @@ enum View {
     Timeline,
     Graph,
     Alerts,
+    Analysis,
     Data,
     Ai,
     Settings,
@@ -133,6 +135,7 @@ pub struct StudioApp {
     gag_only: bool,
     season_sheet: Option<i64>,
     season_arc: (i64, String),
+    analysis: analysis_view::AnalysisState,
     tag_input: String,
     tag_filter: Option<i64>,
     char_secondary: bool,
@@ -208,6 +211,7 @@ impl StudioApp {
             gag_only: false,
             season_sheet: None,
             season_arc: (0, String::new()),
+            analysis: analysis_view::AnalysisState::default(),
             tag_input: String::new(),
             tag_filter: None,
             char_secondary: false,
@@ -1162,6 +1166,7 @@ impl eframe::App for StudioApp {
                     View::Timeline => self.timeline_view(ui),
                     View::Graph => self.graph_view(ui),
                     View::Alerts => self.alerts_view(ui),
+                    View::Analysis => self.analysis_view(ui),
                     View::Data => self.data_view(ui),
                     View::Trash => self.trash_view(ui),
                     View::Ai => self.ai_view(ui),
