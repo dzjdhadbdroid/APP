@@ -83,8 +83,8 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (
         10,
         include_str!("../../migrations/0010_attachment_text.sql"),
-        (11, include_str!("../../migrations/0011_images.sql")),
     ),
+    (11, include_str!("../../migrations/0011_images.sql")),
 ];
 
 pub fn open(path: &Path) -> DbResult<Connection> {
